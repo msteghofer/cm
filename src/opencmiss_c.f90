@@ -1,5 +1,4 @@
 !> \file
-!> $Id$
 !> \author Chris Bradley
 !> \brief The top level OpenCMISS module for C bindings.
 !>
@@ -51,6 +50,7 @@
 !> The top level OpenCMISS module for C. This module is the buffer module between the OpenCMISS library and user C code.
 MODULE OPENCMISS_C
 
+  USE CMISS_FORTRAN_C
   USE ISO_C_BINDING
   USE ISO_VARYING_STRING
   USE OPENCMISS
@@ -404,6 +404,12 @@ MODULE OPENCMISS_C
  PUBLIC CMISSEquationsSetAnalyticCreateStartCNum, CMISSEquationsSetAnalyticCreateStartCPtr
 
  PUBLIC CMISSEquationsSetAnalyticDestroyCNum, CMISSEquationsSetAnalyticDestroyCPtr
+
+ PUBLIC CMISSEquationsSetAnalyticEvaluateCNum, CMISSEquationsSetAnalyticEvaluateCPtr
+
+ PUBLIC CMISSEquationsSetAnalyticTimeGetCNum, CMISSEquationsSetAnalyticTimeGetCPtr
+
+ PUBLIC CMISSEquationsSetAnalyticTimeSetCNum, CMISSEquationsSetAnalyticTimeSetCPtr
 
  PUBLIC CMISSEquationsSetBoundaryConditionsAnalyticCNum, CMISSEquationsSetBoundaryConditionsAnalyticCPtr
 
@@ -1005,63 +1011,6 @@ CONTAINS
 
   END FUNCTION CMISSInitialiseCPtr
 
-  !
-  !================================================================================================================================
-  !
-
-  !>Copys/converts a C string (array of characters) to a Fortran String (length of characters)
-  SUBROUTINE CMISSC2FString(Cstring,Fstring)
-    !Argument variables
-    CHARACTER(LEN=1,KIND=C_CHAR), INTENT(IN) :: Cstring(:)
-    CHARACTER(LEN=*), INTENT(OUT) :: Fstring
-    !Local variables
-    INTEGER(C_INT) :: i,LENGTH
-
-    IF(LEN(Fstring)>=SIZE(Cstring,1)-1) THEN
-      LENGTH=SIZE(Cstring,1)-1
-    ELSE
-      LENGTH=LEN(Fstring)
-    ENDIF
-    Fstring=""
-    DO i=1,LENGTH
-      IF(Cstring(i)==C_NULL_CHAR) THEN
-        EXIT
-      ELSE
-        Fstring(i:i)=Cstring(i)
-      ENDIF
-    ENDDO !i
-    
-    RETURN
-    
-  END SUBROUTINE CMISSC2FSTRING
-   
-  !
-  !================================================================================================================================
-  !
-
-  !>Copys/converts a  Fortran String (length of characters) to a C string (array of characters)
-  SUBROUTINE CMISSF2CString(Fstring,Cstring)
-    !Argument variables
-    CHARACTER(LEN=*), INTENT(IN) :: Fstring
-    CHARACTER(LEN=1,KIND=C_CHAR), INTENT(OUT) :: Cstring(:)
-    !Local variables
-    INTEGER(C_INT) :: i,LENGTH
-
-    IF(SIZE(Cstring,1)>LEN_TRIM(Fstring)) THEN
-      LENGTH=LEN_TRIM(Fstring)
-    ELSE
-      LENGTH=SIZE(Cstring,1)-1
-    ENDIF
-    DO i=1,LENGTH     
-      Cstring(i)=Fstring(i:i)
-    ENDDO !i
-    !Null terminate the string
-    Cstring(LENGTH+1)=C_NULL_CHAR
-    
-    RETURN
-    
-  END SUBROUTINE CMISSF2CSTRING
-   
   !
   !================================================================================================================================
   !
@@ -2598,8 +2547,8 @@ CONTAINS
   ! 
 
   !>Get percentage error value for the node in a field specified by a user number compared to the analytic value for C.
-  FUNCTION CMISSAnalyticAnalysisPercentageErrorGetNodeCNum(RegionUserNumber,FieldUserNumber,VariableType,VersionNumber, &
-    & DerivativeNumber, NodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSAnalyticAnalysisPercentageErrorGetNodeNum")
+  FUNCTION CMISSAnalyticAnalysisPercentageErrorGetNodeCNum(RegionUserNumber,FieldUserNumber,VariableType,VersionNumber, & 
+    & DerivativeNumber,NodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSAnalyticAnalysisPercentageErrorGetNodeNum")
 
   !Argument Variables
     INTEGER(C_INT), VALUE, INTENT(IN) :: RegionUserNumber !<The user number of the region containing the field for analytic error analysis for C.
@@ -2614,7 +2563,7 @@ CONTAINS
     INTEGER(C_INT) :: CMISSAnalyticAnalysisPercentageErrorGetNodeCNum !<Error Code.
     !Local variables
 
-    CALL CMISSAnalyticAnalysisPercentageErrorGetNode(RegionUserNumber, FieldUserNumber, VersionNumber, DerivativeNumber, &
+    CALL CMISSAnalyticAnalysisPercentageErrorGetNode(RegionUserNumber, FieldUserNumber, VersionNumber,DerivativeNumber, &
       & NodeNumber, ComponentNumber, VariableType, Value, CMISSAnalyticAnalysisPercentageErrorGetNodeCNum)
 
     RETURN
@@ -2664,7 +2613,7 @@ CONTAINS
   ! 
 
   !>Get relative error value for the node in a field specified by a user number compared to the analytic value for C.
-  FUNCTION CMISSAnalyticAnalysisRelativeErrorGetNodeCNum(RegionUserNumber,FieldUserNumber,VariableType,VersionNumber, &
+  FUNCTION CMISSAnalyticAnalysisRelativeErrorGetNodeCNum(RegionUserNumber,FieldUserNumber,VariableType,VersionNumber, & 
     & DerivativeNumber, NodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSAnalyticAnalysisRelativeErrorGetNodeNum")
   
     !Argument variables
@@ -2691,7 +2640,7 @@ CONTAINS
   !  
 
   !>Get relative error value for the node in a field identified by an object compared to the analytic value for C.
-  FUNCTION CMISSAnalyticAnalysisRelativeErrorGetNodeCPtr(FieldPtr,VariableType,VersionNumber,DerivativeNumber,NodeNumber, &
+  FUNCTION CMISSAnalyticAnalysisRelativeErrorGetNodeCPtr(FieldPtr,VariableType,VersionNumber,DerivativeNumber,NodeNumber, & 
     & ComponentNumber,Value) BIND(C, NAME = "CMISSAnalyticAnalysisRelativeErrorGetNode")
   
     !Argument variables
@@ -2711,7 +2660,7 @@ CONTAINS
     IF(C_ASSOCIATED(FieldPtr)) THEN
       CALL C_F_POINTER(FieldPtr, Field)
       IF(ASSOCIATED(Field)) THEN
-        CALL CMISSAnalyticAnalysisRelativeErrorGetNode(Field,VersionNumber,DerivativeNumber,NodeNumber,ComponentNumber, &
+        CALL CMISSAnalyticAnalysisRelativeErrorGetNode(Field,VersionNumber,DerivativeNumber,NodeNumber,ComponentNumber, & 
           & VariableType, Value, CMISSAnalyticAnalysisRelativeErrorGetNodeCPtr)
       ELSE
         CMISSAnalyticAnalysisRelativeErrorGetNodeCPtr = CMISSErrorConvertingPointer
@@ -5254,7 +5203,7 @@ CONTAINS
   !
 
   !>Adds the value to the specified node and sets this as a boundary condition on the specified node for boundary conditions identified by a user number for C.
-  FUNCTION CMISSBoundaryConditionsAddNodeCNum(RegionUserNumber,EquationsSetUserNumber,VariableType,VersionNumber, &
+  FUNCTION CMISSBoundaryConditionsAddNodeCNum(RegionUserNumber,EquationsSetUserNumber,VariableType,VersionNumber, & 
     & DerivativeNumber, NodeUserNumber,ComponentNumber,Condition,Value) BIND(C, NAME = "CMISSBoundaryConditionsAddNodeNum")
 
     !Argument variables
@@ -5304,7 +5253,7 @@ CONTAINS
     IF(C_ASSOCIATED(BoundaryConditionsPtr)) THEN
       CALL C_F_POINTER(BoundaryConditionsPtr, BoundaryConditions)
       IF(ASSOCIATED(BoundaryConditions)) THEN
-        CALL CMISSBoundaryConditionsAddNode(BoundaryConditions, VariableType, VersionNumber, DerivativeNumber,NodeUserNumber, &
+        CALL CMISSBoundaryConditionsAddNode(BoundaryConditions, VariableType, VersionNumber, DerivativeNumber,NodeUserNumber, & 
           & ComponentNumber, Condition, Value, CMISSBoundaryConditionsAddNodeCPtr)
       ELSE
         CMISSBoundaryConditionsAddNodeCPtr = CMISSErrorConvertingPointer
@@ -5352,7 +5301,7 @@ CONTAINS
 
   !>Sets the value of the specified node and sets this as a boundary condition on the specified node for boundary conditions identified by an object for C.
   FUNCTION CMISSBoundaryConditionsSetNodeCPtr(BoundaryConditionsPtr,VariableType,VersionNumber,DerivativeNumber,NodeUserNumber, &
-    & ComponentNumber, Condition,Value) BIND(C, NAME = "CMISSBoundaryConditionsSetNode")
+    & ComponentNumber,Condition,Value) BIND(C, NAME = "CMISSBoundaryConditionsSetNode")
 
     !Argument variables
     TYPE(C_PTR), VALUE, INTENT(IN) :: BoundaryConditionsPtr !<C pointer to the boundary conditions to set the node to.
@@ -9594,6 +9543,163 @@ CONTAINS
   !================================================================================================================================
   !
 
+  !>Evaluates the current analytic solution for an equations set identified by a user number for C.
+  FUNCTION CMISSEquationsSetAnalyticEvaluateCNum(RegionUserNumber,EquationsSetUserNumber) BIND(C, NAME = &
+    & "CMISSEquationsSetAnalyticEvaluateNum")
+
+    !Argument variables
+    INTEGER(C_INT), VALUE, INTENT(IN) :: RegionUserNumber !<The user number for C of the region containing the equations set to evaluate the analytic solution for.
+    INTEGER(C_INT), VALUE, INTENT(IN) :: EquationsSetUserNumber !<The user number for C of the equations set to evaluate the analytic solution for.
+    !Function variable
+    INTEGER(C_INT) :: CMISSEquationsSetAnalyticEvaluateCNum !<Error Code.
+    !Local variable
+
+    CALL CMISSEquationsSetAnalyticEvaluate(RegionUserNumber,EquationsSetUserNumber,CMISSEquationsSetAnalyticEvaluateCNum)
+
+    RETURN
+
+  END FUNCTION CMISSEquationsSetAnalyticEvaluateCNum
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Evaluates the current analytic solution for an equations set identified by an object for C.
+  FUNCTION CMISSEquationsSetAnalyticEvaluateCPtr(EquationsSetPtr) BIND(C, NAME = "CMISSEquationsSetAnalyticEvaluate")
+
+    !Argument variables
+    TYPE(C_PTR), INTENT(IN) :: EquationsSetPtr !<C pointer to the equations set to evaluate the current analytic solution for.
+    !Function variables
+    INTEGER(C_INT) :: CMISSEquationsSetAnalyticEvaluateCPtr !<Error code.
+    !Local variables
+    TYPE(CMISSEquationsSetType), POINTER :: EquationsSet
+
+    CMISSEquationsSetAnalyticEvaluateCPtr = CMISSNoError
+    IF(C_ASSOCIATED(EquationsSetPtr)) THEN
+      CALL C_F_POINTER(EquationsSetPtr, EquationsSet)
+      IF(ASSOCIATED(EquationsSet)) THEN
+        CALL CMISSEquationsSetAnalyticEvaluate(EquationsSet, CMISSEquationsSetAnalyticEvaluateCPtr)
+      ELSE
+        CMISSEquationsSetAnalyticEvaluateCPtr = CMISSErrorConvertingPointer
+      ENDIF
+    ELSE
+      CMISSEquationsSetAnalyticEvaluateCPtr = CMISSPointerIsNULL
+    ENDIF
+
+    RETURN
+
+  END FUNCTION CMISSEquationsSetAnalyticEvaluateCPtr
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Returns the analytic time for an equations set identified by a user number for C.
+  FUNCTION CMISSEquationsSetAnalyticTimeGetCNum(RegionUserNumber,EquationsSetUserNumber,Time) BIND(C, NAME = &
+    & "CMISSEquationsSetAnalyticTimeGetNum")
+
+    !Argument variables
+    INTEGER(C_INT), VALUE, INTENT(IN) :: RegionUserNumber !<The user number for C of the region containing the equations set to get the analytic time for.
+    INTEGER(C_INT), VALUE, INTENT(IN) :: EquationsSetUserNumber !<The user number for C of the equations set to get the analytic time for.
+    REAL(C_DOUBLE), INTENT(OUT) :: Time !<On return, the analytic time for the equations set.
+    !Function variable
+    INTEGER(C_INT) :: CMISSEquationsSetAnalyticTimeGetCNum !<Error Code.
+    !Local variable
+
+    CALL CMISSEquationsSetAnalyticTimeGet(RegionUserNumber,EquationsSetUserNumber,Time,CMISSEquationsSetAnalyticTimeGetCNum)
+
+    RETURN
+
+  END FUNCTION CMISSEquationsSetAnalyticTimeGetCNum
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Returns the analytic time for an equations set identified by an object for C.
+  FUNCTION CMISSEquationsSetAnalyticTimeGetCPtr(EquationsSetPtr,Time) BIND(C, NAME = "CMISSEquationsSetAnalyticTimeGet")
+
+    !Argument variables
+    TYPE(C_PTR), INTENT(IN) :: EquationsSetPtr !<C pointer to the equations set to get the analytic time for.
+    REAL(C_DOUBLE), INTENT(OUT) :: Time !<On return, the analytic time for the equations set.
+    !Function variables
+    INTEGER(C_INT) :: CMISSEquationsSetAnalyticTimeGetCPtr !<Error code.
+    !Local variables
+    TYPE(CMISSEquationsSetType), POINTER :: EquationsSet
+
+    CMISSEquationsSetAnalyticTimeGetCPtr = CMISSNoError
+    IF(C_ASSOCIATED(EquationsSetPtr)) THEN
+      CALL C_F_POINTER(EquationsSetPtr, EquationsSet)
+      IF(ASSOCIATED(EquationsSet)) THEN
+        CALL CMISSEquationsSetAnalyticTimeGet(EquationsSet, Time, CMISSEquationsSetAnalyticTimeGetCPtr)
+      ELSE
+        CMISSEquationsSetAnalyticTimeGetCPtr = CMISSErrorConvertingPointer
+      ENDIF
+    ELSE
+      CMISSEquationsSetAnalyticTimeGetCPtr = CMISSPointerIsNULL
+    ENDIF
+
+    RETURN
+
+  END FUNCTION CMISSEquationsSetAnalyticTimeGetCPtr
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Sets/changes the analytic time for an equations set identified by a user number for C.
+  FUNCTION CMISSEquationsSetAnalyticTimeSetCNum(RegionUserNumber,EquationsSetUserNumber,Time) BIND(C, NAME = &
+    & "CMISSEquationsSetAnalyticTimeSetNum")
+
+    !Argument variables
+    INTEGER(C_INT), VALUE, INTENT(IN) :: RegionUserNumber !<The user number for C of the region containing the equations set to set the analytic time for.
+    INTEGER(C_INT), VALUE, INTENT(IN) :: EquationsSetUserNumber !<The user number for C of the equations set to set the analytic time for.
+    REAL(C_DOUBLE), VALUE, INTENT(IN) :: Time !<The analytic time to set.
+    !Function variable
+    INTEGER(C_INT) :: CMISSEquationsSetAnalyticTimeSetCNum !<Error Code.
+    !Local variable
+
+    CALL CMISSEquationsSetAnalyticTimeSet(RegionUserNumber,EquationsSetUserNumber,Time,CMISSEquationsSetAnalyticTimeSetCNum)
+
+    RETURN
+
+  END FUNCTION CMISSEquationsSetAnalyticTimeSetCNum
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Sets/changes the analytic time for an equations set identified by an object for C.
+  FUNCTION CMISSEquationsSetAnalyticTimeSetCPtr(EquationsSetPtr,Time) BIND(C, NAME = "CMISSEquationsSetAnalyticTimeSet")
+
+    !Argument variables
+    TYPE(C_PTR), INTENT(IN) :: EquationsSetPtr !<C pointer to the equations set to set the analytic time for.
+    REAL(C_DOUBLE), VALUE, INTENT(IN) :: Time !<The analytic time to set.
+    !Function variables
+    INTEGER(C_INT) :: CMISSEquationsSetAnalyticTimeSetCPtr !<Error code.
+    !Local variables
+    TYPE(CMISSEquationsSetType), POINTER :: EquationsSet
+
+    CMISSEquationsSetAnalyticTimeSetCPtr = CMISSNoError
+    IF(C_ASSOCIATED(EquationsSetPtr)) THEN
+      CALL C_F_POINTER(EquationsSetPtr, EquationsSet)
+      IF(ASSOCIATED(EquationsSet)) THEN
+        CALL CMISSEquationsSetAnalyticTimeSet(EquationsSet, Time, CMISSEquationsSetAnalyticTimeSetCPtr)
+      ELSE
+        CMISSEquationsSetAnalyticTimeSetCPtr = CMISSErrorConvertingPointer
+      ENDIF
+    ELSE
+      CMISSEquationsSetAnalyticTimeSetCPtr = CMISSPointerIsNULL
+    ENDIF
+
+    RETURN
+
+  END FUNCTION CMISSEquationsSetAnalyticTimeSetCPtr
+
+  !
+  !================================================================================================================================
+  !
+
   !>Set boundary conditions for an equation set according to the analytic equations for an equations set identified by a user number for C.
   FUNCTION CMISSEquationsSetBoundaryConditionsAnalyticCNum(RegionUserNumber,EquationsSetUserNumber) BIND(C, NAME= &
     & "CMISSEquationsSetBoundaryConditionsAnalyticNum")
@@ -13729,8 +13835,8 @@ CONTAINS
     INTEGER(C_INT) :: CMISSFieldParameterSetAddNodeLCNum !<Error Code.
     !Local variable
 
-    CALL CMISSFieldParameterSetAddNode(RegionUserNumber,FieldUserNumber,VariableType,FieldSetType,VersionNumber,DerivativeNumber, &
-    & UserNodeNumber, ComponentNumber,Value==CMISSTrue,CMISSFieldParameterSetAddNodeLCNum)
+    CALL CMISSFieldParameterSetAddNode(RegionUserNumber,FieldUserNumber,VariableType,FieldSetType,VersionNumber,DerivativeNumber,&
+    & UserNodeNumber,ComponentNumber,Value==CMISSTrue,CMISSFieldParameterSetAddNodeLCNum)
 
     RETURN
 
@@ -15117,7 +15223,7 @@ CONTAINS
 
   !>Returns from the given parameter set an integer value for the specified node and derivative of a field variable component for a field identified by a user number for C.
   FUNCTION CMISSFieldParameterSetGetNodeIntgCNum(RegionUserNumber,FieldUserNumber,VariableType,FieldSetType, &
-    & VersionNumber, DerivativeNumber,UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetGetNodeIntgNum")
+    & VersionNumber,DerivativeNumber,UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetGetNodeIntgNum")
 
     !Argument variables
     INTEGER(C_INT), VALUE, INTENT(IN) :: RegionUserNumber !<The user number of the region containing the field to get the nodal value from the field parameter set, for C..
@@ -15145,7 +15251,7 @@ CONTAINS
   !
 
   !>Returns from the given parameter set an integer value for the specified node and derivative of a field variable component for a field identified by an object for C.
-  FUNCTION CMISSFieldParameterSetGetNodeIntgCPtr(FieldPtr,VariableType,FieldSetType,VersionNumber,DerivativeNumber, &
+  FUNCTION CMISSFieldParameterSetGetNodeIntgCPtr(FieldPtr,VariableType,FieldSetType,VersionNumber,DerivativeNumber,&
     & UserNodeNumber, ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetGetNodeIntg")
 
     !Argument variables
@@ -15185,7 +15291,7 @@ CONTAINS
 
   !>Returns from the given parameter set a single precision value for the specified node and derivative of a field variable component for a field identified by a user number for C.
   FUNCTION CMISSFieldParameterSetGetNodeSPCNum(RegionUserNumber,FieldUserNumber,VariableType,FieldSetType, &
-    & VersionNumber, DerivativeNumber,UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetGetNodeSPNum")
+    & VersionNumber,DerivativeNumber,UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetGetNodeSPNum")
 
     !Argument variables
     INTEGER(C_INT), VALUE, INTENT(IN) :: RegionUserNumber !<The user number of the region containing the field to get the nodal value from the field parameter set, for C.
@@ -15253,7 +15359,7 @@ CONTAINS
 
   !>Returns from the given parameter set a double precision value for the specified node and derivative of a field variable component for a field identified by a user number for C.
   FUNCTION CMISSFieldParameterSetGetNodeDPCNum(RegionUserNumber,FieldUserNumber,VariableType,FieldSetType, &
-    & VersionNumber, DerivativeNumber,UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetGetNodeDPNum")
+    & VersionNumber,DerivativeNumber,UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetGetNodeDPNum")
 
     !Argument variables
     INTEGER(C_INT), VALUE, INTENT(IN) :: RegionUserNumber !<The user number of the region containing the field to get the nodal value from the field parameter set, for C.
@@ -15269,7 +15375,7 @@ CONTAINS
     INTEGER(C_INT) :: CMISSFieldParameterSetGetNodeDPCNum !<Error Code.
     !Local variables
 
-    CALL CMISSFieldParameterSetGetNode(RegionUserNumber, FieldUserNumber, VariableType, FieldSetType, VersionNumber, & 
+    CALL CMISSFieldParameterSetGetNode(RegionUserNumber, FieldUserNumber, VariableType, FieldSetType, VersionNumber, &
       & DerivativeNumber, UserNodeNumber, ComponentNumber,Value, CMISSFieldParameterSetGetNodeDPCNum)
 
     RETURN
@@ -15321,7 +15427,7 @@ CONTAINS
 
   !>Returns from the given parameter set a logical value for the specified node and derivative of a field variable component for a field identified by a user number for C.
   FUNCTION CMISSFieldParameterSetGetNodeLCNum(RegionUserNumber,FieldUserNumber,VariableType,FieldSetType, &
-    & VersionNumber, DerivativeNumber,UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetGetNodeLNum")
+    & VersionNumber,DerivativeNumber,UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetGetNodeLNum")
 
     !Argument variables
     INTEGER(C_INT), VALUE, INTENT(IN) :: RegionUserNumber !<The user number of the region containing the field to get the nodal value from the field parameter set, for C.
@@ -15962,7 +16068,7 @@ CONTAINS
 
   !>Updates the given parameter set with the given integer value for the node and derivative of the field variable component for a field identified by a user number for C.
   FUNCTION CMISSFieldParameterSetUpdateNodeIntgCNum(RegionUserNumber,FieldUserNumber,VariableType,FieldSetType, &
-    & VersionNumber, DerivativeNumber,UserNodeNumber,ComponentNumber,Value) & 
+    & VersionNumber,DerivativeNumber,UserNodeNumber,ComponentNumber,Value) & 
     & BIND(C, NAME = "CMISSFieldParameterSetUpdateNodeIntgNum")
 
     !Argument variables
@@ -15993,7 +16099,7 @@ CONTAINS
   !>Updates the given parameter set with the given integer value for the node and derivative of the field variable component for a field identified by an object for C.
 
   FUNCTION CMISSFieldParameterSetUpdateNodeIntgCPtr(FieldPtr,VariableType,FieldSetType,VersionNumber,DerivativeNumber, &
-    & UserNodeNumber, ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetUpdateNodeIntg")
+    & UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetUpdateNodeIntg")
 
     !Argument variables
     TYPE(C_PTR), VALUE, INTENT(IN) :: FieldPtr !<C pointer to the field to finishe the parameter set update for.
@@ -16032,7 +16138,7 @@ CONTAINS
 
   !>Updates the given parameter set with the given single precision value for the node and derivative of the field variable component for a field identified by a user number for C.
   FUNCTION CMISSFieldParameterSetUpdateNodeSPCNum(RegionUserNumber,FieldUserNumber,VariableType,FieldSetType, &
-    & VersionNumber, DerivativeNumber,UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetUpdateNodeSPNum")
+    & VersionNumber,DerivativeNumber,UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetUpdateNodeSPNum")
 
     !Argument variables
     INTEGER(C_INT), VALUE, INTENT(IN) :: RegionUserNumber !<The user number of the region containing the field to update the nodal value for the field parameter set, for C.
@@ -16131,7 +16237,7 @@ CONTAINS
   !>Updates the given parameter set with the given double precision value for the node and derivative of the field variable component for a field identified by an object for C.
 
   FUNCTION CMISSFieldParameterSetUpdateNodeDPCPtr(FieldPtr,VariableType,FieldSetType,VersionNumber,DerivativeNumber, &
-    & UserNodeNumber, ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetUpdateNodeDP")
+    & UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetUpdateNodeDP")
 
     !Argument variables
     TYPE(C_PTR), VALUE, INTENT(IN) :: FieldPtr !<C pointer to the field to finishe the parameter set update for.
@@ -16170,7 +16276,7 @@ CONTAINS
 
   !>Updates the given parameter set with the given logical value for the node and derivative of the field variable component for a field identified by a user number for C.
   FUNCTION CMISSFieldParameterSetUpdateNodeLCNum(RegionUserNumber,FieldUserNumber,VariableType,FieldSetType, &
-    & VersionNumber, DerivativeNumber,UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetUpdateNodeLNum")
+    & VersionNumber,DerivativeNumber,UserNodeNumber,ComponentNumber,Value) BIND(C, NAME = "CMISSFieldParameterSetUpdateNodeLNum")
 
     !Argument variables
     INTEGER(C_INT), VALUE, INTENT(IN) :: RegionUserNumber !<The user number of the region containing the field to update the nodal value for the field parameter set, for C.

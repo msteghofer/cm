@@ -2,7 +2,6 @@
 #
 # For use with GNU make.
 #
-# $Id$
 #
 #----------------------------------------------------------------------------------------------------------------------------------
 # Makefile for compiling OpenCMISS library
@@ -55,6 +54,7 @@
 MAKEFLAGS = --no-builtin-rules --warn-undefined-variables
 
 #----------------------------------------------------------------------------------------------------------------------------------
+USEFIELDML := true
 
 ifndef OPENCMISS_ROOT
   OPENCMISS_ROOT = $(CURDIR)/../
@@ -82,8 +82,8 @@ ifndef USECELLML
 endif
 
 ifndef USEFIELDML
-  USEFIELDML := false
-#  USEFIELDML := true
+#  USEFIELDML := false
+  USEFIELDML := true
 endif
 
 ifndef USEPROCPOINTER
@@ -754,7 +754,8 @@ ifeq ($(USEFIELDML),true)
     FIELDML_OBJECT =  \
       $(OBJECT_DIR)/fieldml_util_routines.o \
       $(OBJECT_DIR)/fieldml_input_routines.o \
-      $(OBJECT_DIR)/fieldml_output_routines.o
+      $(OBJECT_DIR)/fieldml_output_routines.o \
+      $(OBJECT_DIR)/fieldml_types.o
 else
     FIELDML_OBJECT = #
 endif
@@ -779,6 +780,7 @@ OBJECTS = $(OBJECT_DIR)/advection_diffusion_equation_routines.o \
 	$(OBJECT_DIR)/biodomain_equation_routines.o \
 	$(OBJECT_DIR)/boundary_condition_routines.o \
 	$(OBJECT_DIR)/blas.o \
+	$(OBJECT_DIR)/Burgers_equation_routines.o \
 	$(OBJECT_DIR)/classical_field_routines.o \
 	$(OBJECT_DIR)/cmiss.o \
 	$(OBJECT_DIR)/cmiss_c.o \
@@ -852,6 +854,8 @@ OBJECTS = $(OBJECT_DIR)/advection_diffusion_equation_routines.o \
 	$(OBJECT_DIR)/Poisson_equations_routines.o \
 	$(OBJECT_DIR)/problem_constants.o \
 	$(OBJECT_DIR)/problem_routines.o \
+	$(OBJECT_DIR)/reaction_diffusion_equation_routines.o \
+        $(OBJECT_DIR)/reaction_diffusion_IO_routines.o \
 	$(OBJECT_DIR)/region_routines.o \
 	$(OBJECT_DIR)/Stokes_equations_routines.o \
 	$(OBJECT_DIR)/solver_routines.o \
@@ -908,6 +912,7 @@ MOD_FIELDML: $(FIELDML_OBJECT)
 	cp $(OBJECT_DIR)/fieldml_input_routines.mod $(INC_DIR)/fieldml_input_routines.mod
 	cp $(OBJECT_DIR)/fieldml_output_routines.mod $(INC_DIR)/fieldml_output_routines.mod
 	cp $(OBJECT_DIR)/fieldml_util_routines.mod $(INC_DIR)/fieldml_util_routines.mod
+	cp $(OBJECT_DIR)/fieldml_types.mod $(INC_DIR)/fieldml_types.mod
 
 $(HEADER_INCLUDE) : $(HEADER_SOURCE_INC)
 	cp $(HEADER_SOURCE_INC) $@ 
@@ -1013,6 +1018,7 @@ $(OBJECT_DIR)/biodomain_equation_routines.o	:	$(SOURCE_DIR)/biodomain_equation_r
 	$(OBJECT_DIR)/equations_matrices_routines.o \
 	$(OBJECT_DIR)/equations_set_constants.o \
 	$(OBJECT_DIR)/field_routines.o \
+	$(OBJECT_DIR)/field_IO_routines.o \
 	$(OBJECT_DIR)/input_output.o \
 	$(OBJECT_DIR)/iso_varying_string.o \
 	$(OBJECT_DIR)/kinds.o \
@@ -1052,6 +1058,7 @@ $(OBJECT_DIR)/classical_field_routines.o	:	$(SOURCE_DIR)/classical_field_routine
 	$(OBJECT_DIR)/Laplace_equations_routines.o \
 	$(OBJECT_DIR)/Poisson_equations_routines.o \
 	$(OBJECT_DIR)/problem_constants.o \
+	$(OBJECT_DIR)/reaction_diffusion_equation_routines.o \
 	$(OBJECT_DIR)/strings.o \
 	$(OBJECT_DIR)/types.o \
 	$(MACHINE_OBJECTS)
@@ -1083,6 +1090,8 @@ $(OBJECT_DIR)/cmiss_cellml.o	:	$(SOURCE_DIR)/cmiss_cellml.f90 \
 	$(OBJECT_DIR)/types.o
 
 $(OBJECT_DIR)/cmiss_cellml_dummy.o	:	$(SOURCE_DIR)/cmiss_cellml_dummy.f90 
+
+$(OBJECT_DIR)/cmiss_fortran_c.o	:	$(SOURCE_DIR)/cmiss_fortran_c.f90 
 
 $(OBJECT_DIR)/cmiss_mpi.o	:	$(SOURCE_DIR)/cmiss_mpi.f90 \
 	$(OBJECT_DIR)/base_routines.o \
@@ -1160,7 +1169,6 @@ $(OBJECT_DIR)/Darcy_equations_routines.o	:	$(SOURCE_DIR)/Darcy_equations_routine
 	$(OBJECT_DIR)/solver_routines.o \
 	$(OBJECT_DIR)/timer_f.o \
 	$(OBJECT_DIR)/types.o
-
 $(OBJECT_DIR)/Darcy_pressure_equations_routines.o	:	$(SOURCE_DIR)/Darcy_pressure_equations_routines.f90 \
 	$(OBJECT_DIR)/base_routines.o \
 	$(OBJECT_DIR)/basis_routines.o \
@@ -1186,25 +1194,23 @@ $(OBJECT_DIR)/Darcy_pressure_equations_routines.o	:	$(SOURCE_DIR)/Darcy_pressure
 	$(OBJECT_DIR)/timer_f.o \
 	$(OBJECT_DIR)/types.o
 
+
 $(OBJECT_DIR)/fieldml_input_routines.o: $(SOURCE_DIR)/fieldml_input_routines.f90 \
-#	$(OBJECT_DIR)/fieldml_api.o \
 	$(OBJECT_DIR)/fieldml_util_routines.o \
-	$(OBJECT_DIR)/opencmiss.o \
+	$(OBJECT_DIR)/fieldml_types.o \
 	$(OBJECT_DIR)/util_array.o
 
 $(OBJECT_DIR)/fieldml_output_routines.o: $(SOURCE_DIR)/fieldml_output_routines.f90 \
 	$(OBJECT_DIR)/kinds.o \
-#	$(OBJECT_DIR)/fieldml_api.o \
 	$(OBJECT_DIR)/fieldml_util_routines.o \
+	$(OBJECT_DIR)/fieldml_types.o \
 	$(OBJECT_DIR)/iso_varying_string.o \
-	$(OBJECT_DIR)/opencmiss.o \
 	$(OBJECT_DIR)/strings.o
 
 $(OBJECT_DIR)/fieldml_util_routines.o: $(SOURCE_DIR)/fieldml_util_routines.f90 \
 	$(OBJECT_DIR)/kinds.o \
-#	$(OBJECT_DIR)/fieldml_api.o \
+	$(OBJECT_DIR)/fieldml_types.o \
 	$(OBJECT_DIR)/iso_varying_string.o \
-	$(OBJECT_DIR)/opencmiss.o
 
 $(OBJECT_DIR)/finite_elasticity_Darcy_routines.o	:	$(SOURCE_DIR)/finite_elasticity_Darcy_routines.f90 \
 	$(OBJECT_DIR)/base_routines.o \
@@ -1235,7 +1241,7 @@ $(OBJECT_DIR)/finite_elasticity_Darcy_routines.o	:	$(SOURCE_DIR)/finite_elastici
 	$(OBJECT_DIR)/types.o
 
 $(OBJECT_DIR)/finite_elasticity_fluid_pressure_routines.o	:	$(SOURCE_DIR)/finite_elasticity_fluid_pressure_routines.f90 \
-	$(OBJECT_DIR)/base_routines.o \
+                                                                                                           $(OBJECT_DIR)/base_routines.o \
 	$(OBJECT_DIR)/basis_routines.o \
 	$(OBJECT_DIR)/constants.o \
 	$(OBJECT_DIR)/control_loop_routines.o \
@@ -1251,6 +1257,7 @@ $(OBJECT_DIR)/finite_elasticity_fluid_pressure_routines.o	:	$(SOURCE_DIR)/finite
 	$(OBJECT_DIR)/strings.o \
 	$(OBJECT_DIR)/solver_routines.o \
 	$(OBJECT_DIR)/types.o
+
 
 $(OBJECT_DIR)/data_point_routines.o	:	$(SOURCE_DIR)/data_point_routines.f90 \
 	$(OBJECT_DIR)/base_routines.o \
@@ -1329,6 +1336,30 @@ $(OBJECT_DIR)/diffusion_diffusion_routines.o	:	$(SOURCE_DIR)/diffusion_diffusion
 	$(OBJECT_DIR)/types.o
 
 $(OBJECT_DIR)/diffusion_equation_routines.o	:	$(SOURCE_DIR)/diffusion_equation_routines.f90 \
+	$(OBJECT_DIR)/base_routines.o \
+	$(OBJECT_DIR)/basis_routines.o \
+	$(OBJECT_DIR)/boundary_condition_routines.o \
+	$(OBJECT_DIR)/constants.o \
+	$(OBJECT_DIR)/control_loop_routines.o \
+	$(OBJECT_DIR)/distributed_matrix_vector.o \
+	$(OBJECT_DIR)/domain_mappings.o \
+	$(OBJECT_DIR)/equations_routines.o \
+	$(OBJECT_DIR)/equations_mapping_routines.o \
+	$(OBJECT_DIR)/equations_matrices_routines.o \
+	$(OBJECT_DIR)/equations_set_constants.o \
+	$(OBJECT_DIR)/field_routines.o \
+	$(OBJECT_DIR)/fluid_mechanics_IO_routines.o \
+	$(OBJECT_DIR)/input_output.o \
+	$(OBJECT_DIR)/iso_varying_string.o \
+	$(OBJECT_DIR)/kinds.o \
+	$(OBJECT_DIR)/matrix_vector.o \
+	$(OBJECT_DIR)/problem_constants.o \
+	$(OBJECT_DIR)/strings.o \
+	$(OBJECT_DIR)/solver_routines.o \
+	$(OBJECT_DIR)/timer_f.o \
+	$(OBJECT_DIR)/types.o
+
+$(OBJECT_DIR)/Burgers_equation_routines.o	:	$(SOURCE_DIR)/Burgers_equation_routines.f90 \
 	$(OBJECT_DIR)/base_routines.o \
 	$(OBJECT_DIR)/basis_routines.o \
 	$(OBJECT_DIR)/boundary_condition_routines.o \
@@ -1445,11 +1476,13 @@ $(OBJECT_DIR)/equations_set_constants.o	:	$(SOURCE_DIR)/equations_set_constants.
 
 $(OBJECT_DIR)/equations_set_routines.o	:	$(SOURCE_DIR)/equations_set_routines.f90 \
 	$(OBJECT_DIR)/base_routines.o \
+	$(OBJECT_DIR)/basis_routines.o \
 	$(OBJECT_DIR)/bioelectric_routines.o \
 	$(OBJECT_DIR)/classical_field_routines.o \
 	$(OBJECT_DIR)/cmiss_mpi.o \
 	$(OBJECT_DIR)/computational_environment.o \
 	$(OBJECT_DIR)/constants.o \
+	$(OBJECT_DIR)/coordinate_routines.o \
 	$(OBJECT_DIR)/distributed_matrix_vector.o \
 	$(OBJECT_DIR)/domain_mappings.o \
 	$(OBJECT_DIR)/elasticity_routines.o \
@@ -1510,7 +1543,6 @@ $(OBJECT_DIR)/field_IO_routines.o	:	$(SOURCE_DIR)/field_IO_routines.f90 \
 	$(MACHINE_OBJECTS) \
 	$(OBJECT_DIR)/mesh_routines.o \
 	$(OBJECT_DIR)/node_routines.o \
-	$(OBJECT_DIR)/region_routines.o \
 	$(OBJECT_DIR)/strings.o \
 	$(OBJECT_DIR)/types.o
 
@@ -1541,6 +1573,7 @@ $(OBJECT_DIR)/finite_elasticity_routines.o	:	$(SOURCE_DIR)/finite_elasticity_rou
 
 $(OBJECT_DIR)/fluid_mechanics_routines.o	:	$(SOURCE_DIR)/fluid_mechanics_routines.f90 \
 	$(OBJECT_DIR)/base_routines.o \
+	$(OBJECT_DIR)/Burgers_equation_routines.o \
 	$(OBJECT_DIR)/Darcy_equations_routines.o \
 	$(OBJECT_DIR)/Darcy_pressure_equations_routines.o \
 	$(OBJECT_DIR)/equations_set_constants.o \
@@ -1988,6 +2021,10 @@ $(OBJECT_DIR)/opencmiss.o	:	$(SOURCE_DIR)/opencmiss.f90 \
 	$(OBJECT_DIR)/equations_set_routines.o \
 	$(OBJECT_DIR)/field_routines.o \
 	$(OBJECT_DIR)/field_IO_routines.o \
+	$(OBJECT_DIR)/fieldml_types.o \
+	$(OBJECT_DIR)/fieldml_util_routines.o \
+	$(OBJECT_DIR)/fieldml_input_routines.o \
+	$(OBJECT_DIR)/fieldml_output_routines.o \
 	$(OBJECT_DIR)/finite_elasticity_routines.o \
 	$(OBJECT_DIR)/input_output.o \
 	$(OBJECT_DIR)/interface_routines.o \
@@ -2008,6 +2045,7 @@ $(OBJECT_DIR)/opencmiss.o	:	$(SOURCE_DIR)/opencmiss.f90 \
 	$(OBJECT_DIR)/types.o 
 
 $(OBJECT_DIR)/opencmiss_c.o	:	$(SOURCE_DIR)/opencmiss_c.f90 \
+	$(OBJECT_DIR)/cmiss_fortran_c.o \
 	$(OBJECT_DIR)/opencmiss.o 
 
 $(OBJECT_DIR)/Poiseuille_equations_routines.o	:	$(SOURCE_DIR)/Poiseuille_equations_routines.f90 \
@@ -2083,6 +2121,37 @@ $(OBJECT_DIR)/problem_routines.o	:	$(SOURCE_DIR)/problem_routines.f90 \
 	$(OBJECT_DIR)/solver_matrices_routines.o \
 	$(OBJECT_DIR)/strings.o \
 	$(OBJECT_DIR)/timer_f.o \
+	$(OBJECT_DIR)/types.o
+
+
+
+$(OBJECT_DIR)/reaction_diffusion_equation_routines.o	:	$(SOURCE_DIR)/reaction_diffusion_equation_routines.f90 \
+	$(OBJECT_DIR)/base_routines.o \
+	$(OBJECT_DIR)/basis_routines.o \
+	$(OBJECT_DIR)/constants.o \
+	$(OBJECT_DIR)/control_loop_routines.o \
+	$(OBJECT_DIR)/distributed_matrix_vector.o \
+    $(OBJECT_DIR)/domain_mappings.o \
+    $(OBJECT_DIR)/equations_routines.o \
+    $(OBJECT_DIR)/equations_mapping_routines.o \
+    $(OBJECT_DIR)/equations_matrices_routines.o \
+	$(OBJECT_DIR)/equations_set_constants.o \
+    $(OBJECT_DIR)/field_routines.o \
+	$(OBJECT_DIR)/input_output.o \
+	$(OBJECT_DIR)/iso_varying_string.o \
+	$(OBJECT_DIR)/kinds.o \
+    $(OBJECT_DIR)/matrix_vector.o \
+	$(OBJECT_DIR)/problem_constants.o \
+        $(OBJECT_DIR)/reaction_diffusion_IO_routines.o \
+	$(OBJECT_DIR)/solver_routines.o \
+	$(OBJECT_DIR)/strings.o \
+	$(OBJECT_DIR)/timer_f.o \
+	$(OBJECT_DIR)/types.o
+
+$(OBJECT_DIR)/reaction_diffusion_IO_routines.o	:	$(SOURCE_DIR)/reaction_diffusion_IO_routines.f90 \
+	$(OBJECT_DIR)/base_routines.o \
+	$(OBJECT_DIR)/equations_set_constants.o \
+	$(OBJECT_DIR)/field_routines.o \
 	$(OBJECT_DIR)/types.o
 
 $(OBJECT_DIR)/region_routines.o	:	$(SOURCE_DIR)/region_routines.f90 \

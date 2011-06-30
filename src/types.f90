@@ -1,5 +1,4 @@
 !> \file
-!> $Id$
 !> \author Chris Bradley
 !> \brief This module contains all type definitions in order to avoid cyclic module references.
 !>
@@ -1013,7 +1012,7 @@ END TYPE GENERATED_MESH_ELLIPSOID_TYPE
     TYPE(FIELD_INTERPOLATED_POINT_TYPE), POINTER :: FIELD_INTERPOLATED_POINT !<A pointer to the interpolated point of the field that is to be interpolated.
     TYPE(FIELD_INTERPOLATED_POINT_TYPE), POINTER :: GEOMETRIC_INTERPOLATED_POINT !<A pointer to the interpolated point of the geometric field that is to be interpolated.
     INTEGER(INTG) :: PHYSICAL_DERIVATIVE_TYPE !<The type of the physical derivatives that have been interpolated. \see CONSTANTS_PhysicalDerivativeConstants
-    REAL(DP), ALLOCATABLE :: VALUES(:) !<VALUES(component_idx,geometric_component_idx). The physical field component values.
+    REAL(DP), ALLOCATABLE :: VALUES(:) !<VALUES(component_idx). The physical field component values.
   END TYPE FIELD_PHYSICAL_POINT_TYPE
 
   !>Buffer type to allow for arrays of pointers to FIELD_PHYSICAL_POINT_TYPE
@@ -1199,6 +1198,7 @@ END TYPE GENERATED_MESH_ELLIPSOID_TYPE
     INTEGER(INTG) :: DATA_TYPE !<The data type of the field variable.  \see FIELD_ROUTINES_DataTypes,FIELD_ROUTINES
     INTEGER(INTG) :: DOF_ORDER_TYPE !<The order of the DOF's in the field variable \see FIELD_ROUTINES_DOFOrderTypes,FIELD_ROUTINES
     INTEGER(INTG) :: MAX_NUMBER_OF_INTERPOLATION_PARAMETERS !<The maximum number of interpolation parameters in an element for a field variable. 
+    INTEGER(INTG) :: MAX_NUMBER_OF_INTERPOLATION_PARAMETERS_VERSION !<The maximum number of interpolation parameters in an element for a field variable with versions. 
     INTEGER(INTG) :: NUMBER_OF_DOFS !<Number of local degress of freedom for this field variable (excluding ghosted dofs). Old CMISS name NYNR(0,0,nc,nr,nx).
     INTEGER(INTG) :: TOTAL_NUMBER_OF_DOFS !<Number of local degrees of freedom for this field variable (including ghosted dofs). Old CMISS name NYNR(0,0,nc,nr,nx).
     INTEGER(INTG) :: NUMBER_OF_GLOBAL_DOFS !<Number of global degrees of freedom for this field variable. Old CMISS name NYNR(0,0,nc,nr,nx).
@@ -1289,6 +1289,7 @@ END TYPE GENERATED_MESH_ELLIPSOID_TYPE
     INTEGER(INTG) :: STRUCTURE_TYPE !<The structure type of the element matrix. \see EQUATIONS_MATRICES_ROUTINES_EquationsMatrixStructureTypes,EQUATIONS_MATRICES_ROUTINES
     INTEGER(INTG) :: NUMBER_OF_ROWS !<The current number of rows in the element matrix.
     INTEGER(INTG) :: NUMBER_OF_COLUMNS !<The current number of columns in the element matrix.
+    LOGICAL :: VERSION_MATRIX_EXTENSION !<Is .TRUE. if there is a version
     INTEGER(INTG) :: MAX_NUMBER_OF_ROWS !<The maximum (allocated) number of rows in the element matrix.
     INTEGER(INTG) :: MAX_NUMBER_OF_COLUMNS !<The maximu (allocated) number of columns in the element matrix.
     INTEGER(INTG), ALLOCATABLE :: ROW_DOFS(:) !<ROW_DOFS(i). The equations row that the i'th row of the element matrix belongs to.
@@ -1299,6 +1300,7 @@ END TYPE GENERATED_MESH_ELLIPSOID_TYPE
   !>Contains information for an element vector.
   TYPE ELEMENT_VECTOR_TYPE
     INTEGER(INTG) :: NUMBER_OF_ROWS !<The current number of rows in the element vector
+    LOGICAL :: VERSION_MATRIX_EXTENSION !<Is .TRUE. if there is a version 
     INTEGER(INTG) :: MAX_NUMBER_OF_ROWS !<The maximum (allocated) number of rows in the element vecotr
     INTEGER(INTG), ALLOCATABLE :: ROW_DOFS(:) !<ROW_DOFS(i). The equations row that the i'th row of the element vector belongs to
     REAL(DP), ALLOCATABLE :: VECTOR(:) !<VECTOR(i). The value of the i'th row of the element vector
@@ -1774,6 +1776,7 @@ END TYPE GENERATED_MESH_ELLIPSOID_TYPE
     LOGICAL :: ANALYTIC_FINISHED !<Is .TRUE. if the analytic setup for the problem has finished being created, .FALSE. if not.
     LOGICAL :: ANALYTIC_FIELD_AUTO_CREATED !<Is .TRUE. if the analytic field has been auto created, .FALSE. if not.
     TYPE(FIELD_TYPE), POINTER :: ANALYTIC_FIELD !<A pointer to the analytic field for the equations set if one is defined. If no source is defined the pointer is NULL.
+    REAL(DP) :: ANALYTIC_TIME !<The time value to use for analytic evaluations.
     REAL(DP) :: ANALYTIC_USER_PARAMS(20)  !<A small array that can be used to hold various parameters often required in analytic problems. \todo should this be allocated?
   END TYPE EQUATIONS_SET_ANALYTIC_TYPE
 
@@ -2284,6 +2287,7 @@ END TYPE GENERATED_MESH_ELLIPSOID_TYPE
     INTEGER(INTG) :: SCHEME !<The dyanamic solver scheme \see SOLVER_ROUTINES_DynamicSchemeTypes,SOLVER_ROUTINES
     REAL(DP), ALLOCATABLE :: THETA(:) !<THETA(degree_idx). The theta value for the degree_idx'th polynomial in the dynamic solver
     LOGICAL :: EXPLICIT !<Is .TRUE. if the dynamic scheme is an explicit scheme, .FALSE. if not.
+    LOGICAL :: RESTART !<Is .TRUE. if the dynamic scheme is to be restarted (i.e., recalculate values at the current time step), .FALSE. if not.
     LOGICAL :: ALE !<Is .TRUE. if the dynamic scheme is an ALE scheme, .FALSE. if not.
     LOGICAL :: UPDATE_BC !<Is .TRUE. if the dynamic scheme has changing bc, .FALSE. if not.
     REAL(DP) :: CURRENT_TIME !<The current time value for the dynamic solver.
@@ -2437,7 +2441,7 @@ END TYPE GENERATED_MESH_ELLIPSOID_TYPE
     TYPE(NONLINEAR_SOLVER_TYPE), POINTER :: NONLINEAR_SOLVER !<A pointer to the nonlinear solver
     INTEGER(INTG) :: NEWTON_SOLVE_TYPE !<The type of Newton solver
     INTEGER(INTG) :: SOLUTION_INITIALISE_TYPE !<The type of solution vector initialisation \see SOLVER_ROUTINES_SolutionInitialiseTypes,SOLVER_ROUTINES
-    INTEGER(INTG) :: TOTAL_NUMBER_OF_FUNCTION_EVALUATIONS !<The number of function evaluations performed by the Newton solver
+    INTEGER(INTG) :: TOTAL_NUMBER_OF_FUNCTION_EVALUATIONS !<The number of function evaluations performed by the nonlinear solver
     INTEGER(INTG) :: TOTAL_NUMBER_OF_JACOBIAN_EVALUATIONS !<The number of Jacobian evaluations performed by the nonlinear solver
     INTEGER(INTG) :: MAXIMUM_NUMBER_OF_ITERATIONS !<The maximum number of iterations
     INTEGER(INTG) :: MAXIMUM_NUMBER_OF_FUNCTION_EVALUATIONS !<The maximum number of function evaluations
@@ -2805,10 +2809,11 @@ END TYPE GENERATED_MESH_ELLIPSOID_TYPE
     INTEGER(INTG), ALLOCATABLE :: EQUATION_TYPES(:)
     INTEGER(INTG), ALLOCATABLE :: EQUATION_INDICES(:)
   END TYPE SOLVER_MAPPING_VARIABLE_TYPE
-  
+
+  !>Contains information on the variables involved in a solver matrix
   TYPE SOLVER_MAPPING_VARIABLES_TYPE
-    INTEGER(INTG) :: NUMBER_OF_VARIABLES
-    TYPE(SOLVER_MAPPING_VARIABLE_TYPE), ALLOCATABLE :: VARIABLES(:)
+    INTEGER(INTG) :: NUMBER_OF_VARIABLES !<The number of variables involved in the solver matrix.
+    TYPE(SOLVER_MAPPING_VARIABLE_TYPE), ALLOCATABLE :: VARIABLES(:) !<VARIABLES(variable_idx). The variable information for the variable_idx'th variable involved in the solver matrix.
   END TYPE SOLVER_MAPPING_VARIABLES_TYPE
   
   !>Contains information on the solver mapping between the global equation sets and the solver matrices.
@@ -3015,3 +3020,4 @@ END TYPE GENERATED_MESH_ELLIPSOID_TYPE
 #endif
 
 END MODULE TYPES
+
