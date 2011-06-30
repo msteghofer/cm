@@ -178,8 +178,8 @@ CONTAINS
               CASE(EQUATIONS_TIME_STEPPING)
                 !Time stepping DAE equations set
 !!NOTE: The time stepping variable type doesn't have to come from the dependent field, it could come from, say, the source field.
-                !DEPENDENT_VARIABLE=>DEPENDENT_FIELD%VARIABLE_TYPE_MAP(CREATE_VALUES_CACHE%TIME_STEPPING_VARIABLE_TYPE)%PTR
-                CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
+                DEPENDENT_VARIABLE=>DEPENDENT_FIELD%VARIABLE_TYPE_MAP(CREATE_VALUES_CACHE%LINEAR_MATRIX_VARIABLE_TYPES(1))%PTR
+                !CALL FLAG_ERROR("Not implemented.",ERR,ERROR,*999)
               CASE DEFAULT
                 LOCAL_ERROR="The equations time dependence type of "// &
                   & TRIM(NUMBER_TO_VSTRING(EQUATIONS%TIME_DEPENDENCE,"*",ERR,ERROR))//" is invalid."
@@ -1000,6 +1000,7 @@ CONTAINS
                     & TRIM(NUMBER_TO_VSTRING(EQUATIONS%LINEARITY,"*",ERR,ERROR))//" is invalid."
                   CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
                 END SELECT
+              CASE(EQUATIONS_TIME_STEPPING)
               CASE DEFAULT
                 LOCAL_ERROR="The equations time dependence type of "// &
                   & TRIM(NUMBER_TO_VSTRING(EQUATIONS%TIME_DEPENDENCE,"*",ERR,ERROR))//" is invalid."
@@ -1256,6 +1257,7 @@ CONTAINS
                   END SELECT
 !|
 ! SEBK 19/08/2009 not sure about mapping here
+                CASE (EQUATIONS_TIME_STEPPING)
                 CASE DEFAULT
                   LOCAL_ERROR="The equations time dependence type of "// &
                     & TRIM(NUMBER_TO_VSTRING(EQUATIONS%TIME_DEPENDENCE,"*",ERR,ERROR))//" is invalid."
@@ -2533,7 +2535,8 @@ CONTAINS
                   LOCAL_ERROR="The equations linearity type of "// &
                     & TRIM(NUMBER_TO_VSTRING(EQUATIONS%LINEARITY,"*",ERR,ERROR))//" is invalid."
                   CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
-                END SELECT              
+                END SELECT     
+              CASE(EQUATIONS_TIME_STEPPING)         
               CASE DEFAULT
                 LOCAL_ERROR="The equations time dependence type of "// &
                   & TRIM(NUMBER_TO_VSTRING(EQUATIONS%TIME_DEPENDENCE,"*",ERR,ERROR))//" is invalid."
@@ -2629,6 +2632,7 @@ CONTAINS
                           & TRIM(NUMBER_TO_VSTRING(EQUATIONS%LINEARITY,"*",ERR,ERROR))//" is invalid."
                         CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
                       END SELECT
+                    CASE(EQUATIONS_TIME_STEPPING)         
                     CASE DEFAULT
                       LOCAL_ERROR="The equations time dependence type of "// &
                         & TRIM(NUMBER_TO_VSTRING(EQUATIONS%TIME_DEPENDENCE,"*",ERR,ERROR))//" is invalid."

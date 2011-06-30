@@ -60,6 +60,7 @@ MODULE SOLVER_ROUTINES
   USE INPUT_OUTPUT
   USE INTERFACE_CONDITIONS_CONSTANTS
   USE ISO_VARYING_STRING
+  USE NODE_ROUTINES
   USE PROBLEM_CONSTANTS
   USE SOLVER_MAPPING_ROUTINES
   USE SOLVER_MATRICES_ROUTINES
@@ -88,6 +89,7 @@ MODULE SOLVER_ROUTINES
   INTEGER(INTG), PARAMETER :: SOLVER_OPTIMISER_TYPE=6 !<An optimiser solver \see SOLVER_ROUTINES_SolverTypes,SOLVER_ROUTINES
   INTEGER(INTG), PARAMETER :: SOLVER_CELLML_EVALUATOR_TYPE=7 !<A CellML evaluation solver \see SOLVER_ROUTINES_SolverTypes,SOLVER_ROUTINES
   INTEGER(INTG), PARAMETER :: SOLVER_STATE_ITERATION_TYPE=8 !<An state iteration solver \see SOLVER_ROUTINES_SolverTypes,SOLVER_ROUTINES
+  INTEGER(INTG), PARAMETER :: SOLVER_STATE_TYPE=9 !<A state solver \see SOLVER_ROUTINES_SolverTypes,SOLVER_ROUTINES
   !>@}
 
   !> \addtogroup SOLVER_ROUTINES_SolverLibraries SOLVER_ROUTINES::SolverLibraries
@@ -281,6 +283,13 @@ MODULE SOLVER_ROUTINES
   INTEGER(INTG), PARAMETER :: SOLVER_SOLUTION_INITIALISE_NO_CHANGE=2 !<Do not change the solution before a solve \see SOLVER_ROUTINES_SolutionInitialiseTypes,SOLVER_ROUTINES
   !>@}
 
+  !> \addtogroup SOLVER_ROUTINES_StateSolverTypes SOLVER_ROUTINES::StateSolverTypes
+  !> \brief The types of state solvers
+  !> \see SOLVER_ROUTINES
+  !>@{
+  INTEGER(INTG), PARAMETER :: SOLVER_STATE_FMM=1 !<Fast marching method solver type \see SOLVER_ROUTINES_StateSolverTypes,SOLVER_ROUTINES
+  !>@}
+  
   !> \addtogroup SOLVER_ROUTINES_OutputTypes SOLVER_ROUTINES::OutputTypes
   !> \brief The types of output
   !> \see SOLVER_ROUTINES
@@ -349,7 +358,7 @@ MODULE SOLVER_ROUTINES
   PUBLIC SOLVER_NUMBER_OF_SOLVER_TYPES
   
   PUBLIC SOLVER_LINEAR_TYPE,SOLVER_NONLINEAR_TYPE,SOLVER_DYNAMIC_TYPE,SOLVER_DAE_TYPE,SOLVER_EIGENPROBLEM_TYPE, &
-    & SOLVER_OPTIMISER_TYPE,SOLVER_CELLML_EVALUATOR_TYPE
+    & SOLVER_OPTIMISER_TYPE,SOLVER_CELLML_EVALUATOR_TYPE,SOLVER_STATE_TYPE
 
   PUBLIC SOLVER_CMISS_LIBRARY,SOLVER_PETSC_LIBRARY,SOLVER_MUMPS_LIBRARY,SOLVER_SUPERLU_LIBRARY,SOLVER_SPOOLES_LIBRARY, &
     & SOLVER_UMFPACK_LIBRARY,SOLVER_LUSOL_LIBRARY,SOLVER_ESSL_LIBRARY,SOLVER_LAPACK_LIBRARY,SOLVER_TAO_LIBRARY, &
@@ -405,10 +414,10 @@ MODULE SOLVER_ROUTINES
   
   PUBLIC SOLVER_SPARSE_MATRICES,SOLVER_FULL_MATRICES
 
-  PUBLIC SOLVER_EQUATIONS_LINEAR,SOLVER_EQUATIONS_NONLINEAR
+  PUBLIC SOLVER_EQUATIONS_LINEAR,SOLVER_EQUATIONS_NONLINEAR,SOLVER_EQUATIONS_STATEITERATION
 
   PUBLIC SOLVER_EQUATIONS_STATIC,SOLVER_EQUATIONS_QUASISTATIC,SOLVER_EQUATIONS_FIRST_ORDER_DYNAMIC, &
-    & SOLVER_EQUATIONS_SECOND_ORDER_DYNAMIC
+    & SOLVER_EQUATIONS_SECOND_ORDER_DYNAMIC,SOLVER_EQUATIONS_TIME_STEPPING
 
   PUBLIC CELLML_EQUATIONS_CELLML_ADD
 
@@ -550,6 +559,8 @@ MODULE SOLVER_ROUTINES
 
   PUBLIC SOLVER_NEWTON_CELLML_EVALUATOR_CREATE,SOLVER_LINKED_SOLVER_ADD,SOLVER_CELLML_EVALUATOR_FINALISE
 
+  PUBLIC SOLVER_EQUATIONS_SET_ADD
+  
 CONTAINS
 
   !
@@ -5916,7 +5927,9 @@ CONTAINS
             CALL FLAG_ERROR("Can not finish solver equations creation for a solver that has been linked.",ERR,ERROR,*999)
           ELSE
             !Finish of the solver mapping
-            CALL SOLVER_MAPPING_CREATE_FINISH(SOLVER_EQUATIONS%SOLVER_MAPPING,ERR,ERROR,*999)
+            !IF (.NOT. (SOLVER%SOLVE_TYPE==SOLVER_DYNAMIC_TYPE)) THEN
+              CALL SOLVER_MAPPING_CREATE_FINISH(SOLVER_EQUATIONS%SOLVER_MAPPING,ERR,ERROR,*999)
+            !ENDIF
             !Now finish off with the solver specific actions
             SELECT CASE(SOLVER%SOLVE_TYPE)
             CASE(SOLVER_LINEAR_TYPE)
@@ -5924,11 +5937,14 @@ CONTAINS
             CASE(SOLVER_NONLINEAR_TYPE)
               CALL SOLVER_NONLINEAR_CREATE_FINISH(SOLVER%NONLINEAR_SOLVER,ERR,ERROR,*999)
             CASE(SOLVER_DYNAMIC_TYPE)
+              PRINT *,"DYNAMIC - Falsch!"
               CALL SOLVER_DYNAMIC_CREATE_FINISH(SOLVER%DYNAMIC_SOLVER,ERR,ERROR,*999)
             CASE(SOLVER_DAE_TYPE)
               CALL SOLVER_DAE_CREATE_FINISH(SOLVER%DAE_SOLVER,ERR,ERROR,*999)
             CASE(SOLVER_EIGENPROBLEM_TYPE)
               CALL SOLVER_EIGENPROBLEM_CREATE_FINISH(SOLVER%EIGENPROBLEM_SOLVER,ERR,ERROR,*999)
+            CASE(SOLVER_STATE_TYPE)
+              !CALL SOLVER_EIGENPROBLEM_CREATE_FINISH(SOLVER%EIGENPROBLEM_SOLVER,ERR,ERROR,*999)
             CASE DEFAULT
               LOCAL_ERROR="The solver type of "//TRIM(NUMBER_TO_VSTRING(SOLVER%SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
               CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
@@ -5993,6 +6009,8 @@ CONTAINS
               CALL SOLVER_MAPPING_SOLVER_MATRICES_NUMBER_SET(SOLVER_MAPPING,0,ERR,ERROR,*999)
             CASE(SOLVER_EIGENPROBLEM_TYPE)
               CALL SOLVER_MAPPING_SOLVER_MATRICES_NUMBER_SET(SOLVER_MAPPING,2,ERR,ERROR,*999)
+            CASE(SOLVER_STATE_TYPE)
+              !CALL SOLVER_MAPPING_SOLVER_MATRICES_NUMBER_SET(SOLVER_MAPPING,0,ERR,ERROR,*999)
             CASE DEFAULT
               LOCAL_ERROR="The solver type of "//TRIM(NUMBER_TO_VSTRING(SOLVER%SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
               CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
@@ -6351,6 +6369,8 @@ CONTAINS
               SOLVER_EQUATIONS%LINEARITY=SOLVER_EQUATIONS_LINEAR
             CASE(SOLVER_EQUATIONS_NONLINEAR)
               SOLVER_EQUATIONS%LINEARITY=SOLVER_EQUATIONS_NONLINEAR
+            CASE(SOLVER_EQUATIONS_STATEITERATION)
+              SOLVER_EQUATIONS%LINEARITY=SOLVER_EQUATIONS_STATEITERATION
             CASE DEFAULT
               LOCAL_ERROR="The specified solver equations linearity type of "// &
                 & TRIM(NUMBER_TO_VSTRING(LINEARITY_TYPE,"*",ERR,ERROR))//" is invalid."
@@ -6509,6 +6529,7 @@ CONTAINS
       CALL SOLVER_DAE_FINALISE(SOLVER%DAE_SOLVER,ERR,ERROR,*999)        
       CALL SOLVER_EIGENPROBLEM_FINALISE(SOLVER%EIGENPROBLEM_SOLVER,ERR,ERROR,*999)
       CALL SOLVER_OPTIMISER_FINALISE(SOLVER%OPTIMISER_SOLVER,ERR,ERROR,*999)
+      CALL SOLVER_STATE_FINALISE(SOLVER%STATE_SOLVER,ERR,ERROR,*999)
       CALL SOLVER_CELLML_EVALUATOR_FINALISE(SOLVER%CELLML_EVALUATOR_SOLVER,ERR,ERROR,*999)
       IF(.NOT.ASSOCIATED(SOLVER%LINKING_SOLVER)) &
         & CALL SOLVER_EQUATIONS_FINALISE(SOLVER%SOLVER_EQUATIONS,ERR,ERROR,*999)
@@ -15172,6 +15193,7 @@ CONTAINS
     TYPE(VARYING_STRING) :: LOCAL_ERROR
 
     CALL ENTERS("SOLVER_SOLVE",ERR,ERROR,*999)
+    PRINT *,"SOLVER_SOLVE!!! type=",SOLVER%SOLVE_TYPE
 
     IF(ASSOCIATED(SOLVER)) THEN
       IF(SOLVER%SOLVER_FINISHED) THEN
@@ -15202,6 +15224,9 @@ CONTAINS
         CASE(SOLVER_CELLML_EVALUATOR_TYPE)
           !Solve a CellML evaluator
           CALL SOLVER_CELLML_EVALUATOR_SOLVE(SOLVER%CELLML_EVALUATOR_SOLVER,ERR,ERROR,*999)
+        CASE(SOLVER_STATE_TYPE)
+          !Solve state problem
+          CALL SOLVER_STATE_SOLVE(SOLVER%STATE_SOLVER,ERR,ERROR,*999)
         CASE DEFAULT
           LOCAL_ERROR="The solver type of "//TRIM(NUMBER_TO_VSTRING(SOLVER%SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
           CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
@@ -15232,6 +15257,766 @@ CONTAINS
     RETURN 1
    
   END SUBROUTINE SOLVER_SOLVE
+
+
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Finishes the process of creating an state solver 
+  SUBROUTINE SOLVER_STATE_CREATE_FINISH(STATE_SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer to the state solver to finish the creation of.
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+
+    CALL ENTERS("SOLVER_STATE_CREATE_FINISH",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(STATE_SOLVER)) THEN
+      SELECT CASE(STATE_SOLVER%STATE_SOLVE_TYPE)
+      CASE(SOLVER_STATE_FMM)
+        CALL SOLVER_FMM_CREATE_FINISH(STATE_SOLVER%FMM_SOLVER,ERR,ERROR,*999)
+      CASE DEFAULT
+        LOCAL_ERROR="The state solver type of "// &
+          & TRIM(NUMBER_TO_VSTRING(STATE_SOLVER%STATE_SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
+        CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+      END SELECT
+    ELSE
+      CALL FLAG_ERROR("State solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+        
+    CALL EXITS("SOLVER_STATE_CREATE_FINISH")
+    RETURN
+999 CALL ERRORS("SOLVER_STATE_CREATE_FINISH",ERR,ERROR)    
+    CALL EXITS("SOLVER_STATE_CREATE_FINISH")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_STATE_CREATE_FINISH
+        
+  !
+  !================================================================================================================================
+  !
+
+  !>Finishes the process of creating an FMM solver 
+  SUBROUTINE SOLVER_FMM_CREATE_FINISH(FMM_SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(FMM_SOLVER_TYPE), POINTER :: FMM_SOLVER !<A pointer to the FMM solver to finish the creation of.
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+
+    CALL ENTERS("SOLVER_FMM_CREATE_FINISH",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(FMM_SOLVER)) THEN
+      !Do nothing
+    ELSE
+      CALL FLAG_ERROR("State solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+        
+    CALL EXITS("SOLVER_FMM_CREATE_FINISH")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_CREATE_FINISH",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_CREATE_FINISH")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_FMM_CREATE_FINISH
+        
+  !
+  !================================================================================================================================
+  !
+
+  !>Finalise a state solver.
+  SUBROUTINE SOLVER_STATE_FINALISE(STATE_SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer the state solver to finalise
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+
+    CALL ENTERS("SOLVER_STATE_FINALISE",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(STATE_SOLVER)) THEN        
+      CALL SOLVER_FMM_FINALISE(STATE_SOLVER%FMM_SOLVER,ERR,ERROR,*999)
+      DEALLOCATE(STATE_SOLVER)
+    ENDIF
+         
+    CALL EXITS("SOLVER_STATE_FINALISE")
+    RETURN
+999 CALL ERRORS("SOLVER_STATE_FINALISE",ERR,ERROR)    
+    CALL EXITS("SOLVER_STATE_FINALISE")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_STATE_FINALISE
+  !
+  !================================================================================================================================
+  !
+
+  !>Initialise a FMM solver for a state solver
+  SUBROUTINE SOLVER_FMM_INITIALISE(STATE_SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer the solver to initialise the FMM solver for
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    INTEGER(INTG) :: DUMMY_ERR
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER
+    TYPE(VARYING_STRING) :: DUMMY_ERROR
+ 
+    CALL ENTERS("SOLVER_FMM_INITIALISE",ERR,ERROR,*998)
+
+    IF(ASSOCIATED(STATE_SOLVER)) THEN
+      IF(ASSOCIATED(STATE_SOLVER%FMM_SOLVER)) THEN
+        CALL FLAG_ERROR("FMM solver is already associated for this state solver.",ERR,ERROR,*998)
+      ELSE        
+        SOLVER=>STATE_SOLVER%SOLVER
+        IF(ASSOCIATED(SOLVER)) THEN
+          !Allocate and initialise a FMM solver
+          ALLOCATE(STATE_SOLVER%FMM_SOLVER,STAT=ERR)
+          IF(ERR/=0) CALL FLAG_ERROR("Could not allocate state solver FMM solver.",ERR,ERROR,*999)
+          STATE_SOLVER%FMM_SOLVER%STATE_SOLVER=>STATE_SOLVER
+          STATE_SOLVER%FMM_SOLVER%SOLVER_LIBRARY=SOLVER_CMISS_LIBRARY
+#ifdef USEPROCPOINTER
+          NULLIFY(STATE_SOLVER%FMM_SOLVER%SPEED_FUNCTION)
+          STATE_SOLVER%FMM_SOLVER%SPEED_FUNCTION => SPEED_FUNCTION_FIBER_DIRECTION
+#else
+          CALL FLAG_ERROR("Procedure pointers are not supported by your compiler.",ERR,ERROR,*999)
+#endif
+        ELSE
+          CALL FLAG_ERROR("State solver solver is not associated.",ERR,ERROR,*998)
+        ENDIF
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("State solver is not associated.",ERR,ERROR,*998)
+    ENDIF
+        
+    CALL EXITS("SOLVER_FMM_INITIALISE")
+    RETURN
+999 CALL SOLVER_FMM_FINALISE(STATE_SOLVER%FMM_SOLVER,DUMMY_ERR,DUMMY_ERROR,*998)
+998 CALL ERRORS("SOLVER_FMM_INITIALISE",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_INITIALISE")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_FMM_INITIALISE
+  !
+  !================================================================================================================================
+  !
+
+  !>Finalise a Newton solver and deallocate all memory
+  SUBROUTINE SOLVER_FMM_FINALISE(FMM_SOLVER,ERR,ERROR,*)
+    
+    !Argument variables
+    TYPE(FMM_SOLVER_TYPE), POINTER :: FMM_SOLVER !<A pointer the Newton solver to finalise
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    
+    CALL ENTERS("SOLVER_FMM_FINALISE",ERR,ERROR,*999)
+    
+    IF(ASSOCIATED(FMM_SOLVER)) THEN
+      DEALLOCATE(FMM_SOLVER)
+    ENDIF
+    
+    CALL EXITS("SOLVER_FMM_FINALISE")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_FINALISE",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_FINALISE")
+    RETURN 1
+    
+  END SUBROUTINE SOLVER_FMM_FINALISE
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Initialise an state solver for a solver.
+  SUBROUTINE SOLVER_STATE_INITIALISE(SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER !<A pointer the solver to initialise the state solver for
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    INTEGER(INTG) :: DUMMY_ERR
+    TYPE(VARYING_STRING) :: DUMMY_ERROR
+
+    CALL ENTERS("SOLVER_STATE_INITIALISE",ERR,ERROR,*998)
+
+    IF(ASSOCIATED(SOLVER)) THEN
+      IF(ASSOCIATED(SOLVER%STATE_SOLVER)) THEN
+        CALL FLAG_ERROR("State solver is already associated for this solver.",ERR,ERROR,*998)
+      ELSE
+        ALLOCATE(SOLVER%STATE_SOLVER,STAT=ERR)
+        IF(ERR/=0) CALL FLAG_ERROR("Could not allocate solver state solver.",ERR,ERROR,*999)
+        SOLVER%STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS=0
+        NULLIFY(SOLVER%STATE_SOLVER%FMM_SOLVER)
+        SOLVER%STATE_SOLVER%SOLVER=>SOLVER
+        !default to FMM solver
+        SOLVER%STATE_SOLVER%STATE_SOLVE_TYPE=SOLVER_STATE_FMM
+        CALL SOLVER_FMM_INITIALISE(SOLVER%STATE_SOLVER,ERR,ERROR,*999)
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("Solver is not associated.",ERR,ERROR,*998)
+    ENDIF
+        
+    CALL EXITS("SOLVER_STATE_INITIALISE")
+    RETURN
+999 CALL SOLVER_STATE_FINALISE(SOLVER%STATE_SOLVER,DUMMY_ERR,DUMMY_ERROR,*998)
+998 CALL ERRORS("SOLVER_STATE_INITIALISE",ERR,ERROR)    
+    CALL EXITS("SOLVER_STATE_INITIALISE")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_STATE_INITIALISE
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Returns the type of library to use for a FMM solver.
+  SUBROUTINE SOLVER_FMM_LIBRARY_TYPE_GET(FMM_SOLVER,SOLVER_LIBRARY_TYPE,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(FMM_SOLVER_TYPE), POINTER :: FMM_SOLVER !<A pointer the state solver to get the library type for.
+    INTEGER(INTG), INTENT(OUT) :: SOLVER_LIBRARY_TYPE !<On exit, the type of library used for the FMM solver \see SOLVER_ROUTINES_SolverLibraries,SOLVER_ROUTINES
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+ 
+    CALL ENTERS("SOLVER_FMM_LIBRARY_TYPE_GET",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(FMM_SOLVER)) THEN
+      SOLVER_LIBRARY_TYPE=FMM_SOLVER%SOLVER_LIBRARY
+    ELSE
+      CALL FLAG_ERROR("FMM solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+    
+    CALL EXITS("SOLVER_FMM_LIBRARY_TYPE_GET")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_LIBRARY_TYPE_GET",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_LIBRARY_TYPE_GET")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_FMM_LIBRARY_TYPE_GET
+  
+  !
+  !================================================================================================================================
+  !
+
+  !>Returns the type of library to use for an state solver.
+  SUBROUTINE SOLVER_STATE_LIBRARY_TYPE_GET(STATE_SOLVER,SOLVER_LIBRARY_TYPE,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer the state solver to get the library type for.
+    INTEGER(INTG), INTENT(OUT) :: SOLVER_LIBRARY_TYPE !<On exit, the type of library used for the state solver \see SOLVER_ROUTINES_SolverLibraries,SOLVER_ROUTINES
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+ 
+    CALL ENTERS("SOLVER_STATE_LIBRARY_TYPE_GET",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(STATE_SOLVER)) THEN
+      SELECT CASE(STATE_SOLVER%STATE_SOLVE_TYPE)
+      CASE(SOLVER_STATE_FMM)
+        CALL SOLVER_FMM_LIBRARY_TYPE_GET(STATE_SOLVER%FMM_SOLVER,SOLVER_LIBRARY_TYPE,ERR,ERROR,*999)
+      CASE DEFAULT
+        LOCAL_ERROR="The state solver type of "// &
+          & TRIM(NUMBER_TO_VSTRING(STATE_SOLVER%STATE_SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
+        CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+      END SELECT
+    ELSE
+      CALL FLAG_ERROR("State solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+    
+    CALL EXITS("SOLVER_STATE_LIBRARY_TYPE_GET")
+    RETURN
+999 CALL ERRORS("SOLVER_STATE_LIBRARY_TYPE_GET",ERR,ERROR)    
+    CALL EXITS("SOLVER_STATE_LIBRARY_TYPE_GET")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_STATE_LIBRARY_TYPE_GET
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Sets/changes the type of library to use for a state solver.
+  SUBROUTINE SOLVER_STATE_LIBRARY_TYPE_SET(STATE_SOLVER,SOLVER_LIBRARY_TYPE,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer the state solver to get the library type for.
+    INTEGER(INTG), INTENT(IN) :: SOLVER_LIBRARY_TYPE !<The type of library for the state solver to set. \see SOLVER_ROUTINES_SolverLibraries,SOLVER_ROUTINES
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+
+    CALL ENTERS("SOLVER_STATE_LIBRARY_TYPE_SET",ERR,ERROR,*999)
+    
+    IF(ASSOCIATED(STATE_SOLVER)) THEN
+      SELECT CASE(STATE_SOLVER%STATE_SOLVE_TYPE)
+      CASE(SOLVER_STATE_FMM)
+        CALL SOLVER_FMM_LIBRARY_TYPE_SET(STATE_SOLVER%FMM_SOLVER,SOLVER_LIBRARY_TYPE,ERR,ERROR,*999)
+      CASE DEFAULT
+        LOCAL_ERROR="The state solver type of "// &
+          & TRIM(NUMBER_TO_VSTRING(STATE_SOLVER%STATE_SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
+        CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+      END SELECT
+
+    ELSE
+      CALL FLAG_ERROR("State solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+        
+    CALL EXITS("SOLVER_STATE_LIBRARY_TYPE_SET")
+    RETURN
+999 CALL ERRORS("SOLVER_STATE_LIBRARY_TYPE_SET",ERR,ERROR)    
+    CALL EXITS("SOLVER_STATE_LIBRARY_TYPE_SET")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_STATE_LIBRARY_TYPE_SET
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Sets/changes the type of library to use for a FMM solver.
+  SUBROUTINE SOLVER_FMM_LIBRARY_TYPE_SET(FMM_SOLVER,SOLVER_LIBRARY_TYPE,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(FMM_SOLVER_TYPE), POINTER :: FMM_SOLVER !<A pointer the FMM solver to get the library type for.
+    INTEGER(INTG), INTENT(IN) :: SOLVER_LIBRARY_TYPE !<The type of library for the FMM solver to set. \see SOLVER_ROUTINES_SolverLibraries,SOLVER_ROUTINES
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+
+    CALL ENTERS("SOLVER_FMM_LIBRARY_TYPE_SET",ERR,ERROR,*999)
+    
+    IF(ASSOCIATED(FMM_SOLVER)) THEN
+      SELECT CASE(SOLVER_LIBRARY_TYPE)
+      CASE(SOLVER_CMISS_LIBRARY)
+        FMM_SOLVER%SOLVER_LIBRARY=SOLVER_CMISS_LIBRARY
+      CASE DEFAULT
+        LOCAL_ERROR="The specified solver library type of "//TRIM(NUMBER_TO_VSTRING(SOLVER_LIBRARY_TYPE,"*",ERR,ERROR))// &
+          & " is invalid for a FMM solver."
+        CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+      END SELECT
+    ELSE
+      CALL FLAG_ERROR("FMM solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+        
+    CALL EXITS("SOLVER_FMM_LIBRARY_TYPE_SET")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_LIBRARY_TYPE_SET",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_LIBRARY_TYPE_SET")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_FMM_LIBRARY_TYPE_SET
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Solve an state solver
+  SUBROUTINE SOLVER_STATE_SOLVE(STATE_SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer the state solver to solve
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+
+    CALL ENTERS("SOLVER_STATE_SOLVE",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(STATE_SOLVER)) THEN        
+      SELECT CASE(STATE_SOLVER%STATE_SOLVE_TYPE)
+      CASE(SOLVER_STATE_FMM)
+        CALL SOLVER_FMM_SOLVE(STATE_SOLVER%FMM_SOLVER,ERR,ERROR,*999)
+      CASE DEFAULT
+        LOCAL_ERROR="The state solver type of "// &
+          & TRIM(NUMBER_TO_VSTRING(STATE_SOLVER%STATE_SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
+        CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+      END SELECT
+
+    ELSE
+      CALL FLAG_ERROR("state solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+         
+    CALL EXITS("SOLVER_STATE_SOLVE")
+    RETURN
+999 CALL ERRORS("SOLVER_STATE_SOLVE",ERR,ERROR)    
+    CALL EXITS("SOLVER_STATE_SOLVE")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_STATE_SOLVE
+
+  !
+  !================================================================================================================================
+  !
+
+  !Solves a state FMM solver 
+  SUBROUTINE SOLVER_FMM_SOLVE(FMM_SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(FMM_SOLVER_TYPE), POINTER :: FMM_SOLVER !<A pointer to the state FMM solver to solve
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    INTEGER(INTG) :: equations_set_idx
+    TYPE(EQUATIONS_SET_TYPE), POINTER :: EQUATIONS_SET
+    TYPE(FIELD_TYPE), POINTER :: DEPENDENT_FIELD, MATERIALS_FIELD, GEOMETRIC_FIELD, FIBRE_FIELD
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER
+    TYPE(NODES_TYPE), POINTER :: NODES
+    TYPE(REGION_TYPE), POINTER :: REGION
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    
+    REAL(DP) :: time, act_time_a, act_time_b, new_act_time
+    INTEGER(INTG) :: node_a, node_b
+    INTEGER(INTG) :: NumberOfNodes
+
+    CALL ENTERS("SOLVER_FMM_SOLVE",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(FMM_SOLVER)) THEN
+      STATE_SOLVER=>FMM_SOLVER%STATE_SOLVER
+      IF(ASSOCIATED(STATE_SOLVER)) THEN
+        SOLVER=>STATE_SOLVER%SOLVER
+        IF(ASSOCIATED(SOLVER)) THEN
+          SELECT CASE(FMM_SOLVER%SOLVER_LIBRARY)
+          CASE(SOLVER_CMISS_LIBRARY)
+            ! Loop over the equations sets
+            DO equations_set_idx=1,STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS
+              EQUATIONS_SET=>STATE_SOLVER%EQUATIONS_SETS(equations_set_idx)%PTR
+              IF(ASSOCIATED(EQUATIONS_SET)) THEN
+                ! Get the required fields for the problem solver
+                DEPENDENT_FIELD=>EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD
+                MATERIALS_FIELD=>EQUATIONS_SET%MATERIALS%MATERIALS_FIELD
+                GEOMETRIC_FIELD=>EQUATIONS_SET%GEOMETRY%GEOMETRIC_FIELD
+                FIBRE_FIELD=>EQUATIONS_SET%GEOMETRY%FIBRE_FIELD
+#ifdef USEPROCPOINTER
+                IF(ASSOCIATED(FMM_SOLVER%SPEED_FUNCTION)) THEN
+!TODO: Replace the following by another function (maybe from "fields"?) - we're not allowed to use region_routines here
+!                  CALL REGION_NODES_GET(DEPENDENT_FIELD%REGION,NODES,Err,ERROR,*999)
+                  CALL NODES_NUMBER_OF_NODES_GET(NODES,NumberOfNodes,Err,ERROR,*999)
+                  DO node_a=1,NumberOfNodes
+                    DO node_b=node_a,NumberOfNodes
+                      !IF (connected(node_a, node_b)) THEN
+                        CALL FIELD_PARAMETER_SET_GET_NODE(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+                          & FIELD_VALUES_SET_TYPE,1,0,node_a,1,act_time_a,ERR,ERROR,*999)
+                        CALL FIELD_PARAMETER_SET_GET_NODE(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+                          & FIELD_VALUES_SET_TYPE,1,0,node_b,1,act_time_b,ERR,ERROR,*999)
+                        IF (act_time_a > 0.0_DP .or. act_time_b > 0.0_DP) THEN
+                          CALL FMM_SOLVER%SPEED_FUNCTION(EQUATIONS_SET,node_a,node_b,time,ERR,ERROR)
+                          IF (act_time_a > 0.0_DP) THEN
+                            new_act_time = act_time_a + time
+                            IF (new_act_time < act_time_b) THEN
+                              CALL FIELD_PARAMETER_SET_UPDATE_NODE(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+                                & FIELD_VALUES_SET_TYPE,1,0,node_b,1,new_act_time,ERR,ERROR,*999)
+                            ENDIF
+                          ENDIF
+                          IF (act_time_b > 0.0_DP) THEN
+                            new_act_time = act_time_b + time
+                            IF (new_act_time < act_time_a) THEN
+                              CALL FIELD_PARAMETER_SET_UPDATE_NODE(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+                                & FIELD_VALUES_SET_TYPE,1,0,node_a,1,new_act_time,ERR,ERROR,*999)
+                            ENDIF
+                          ENDIF
+                          PRINT *,node_a,node_b,time
+                        ENDIF
+                      !ENDIF
+                    ENDDO
+                  ENDDO
+                ELSE
+                  CALL FLAG_ERROR("Speed function is not associated.",ERR,ERROR,*999)
+                ENDIF
+#else
+                CALL FLAG_ERROR("Procedure pointers are not supported by your compiler.",ERR,ERROR,*999)
+#endif
+              ELSE
+                CALL FLAG_ERROR("Equations set with index "// &
+                        & TRIM(NUMBER_TO_VSTRING(equations_set_idx,"*",ERR,ERROR))// &
+                        & " is not associated.",ERR,ERROR,*999)
+              ENDIF
+            ENDDO
+          CASE DEFAULT
+            LOCAL_ERROR="The FMM solver library of "// &
+              & TRIM(NUMBER_TO_VSTRING(FMM_SOLVER%SOLVER_LIBRARY,"*",ERR,ERROR))//" is invalid."
+            CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+          END SELECT
+        ELSE
+          CALL FLAG_ERROR("State solver solver is not associated.",ERR,ERROR,*999)
+        ENDIF
+      ELSE
+        CALL FLAG_ERROR("FMM solver state solver is not associated.",ERR,ERROR,*999)
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("FMM solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+    
+    CALL EXITS("SOLVER_FMM_SOLVE")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_SOLVE",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_SOLVE")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_FMM_SOLVE
+
+  !
+  !================================================================================================================================
+  !
+  
+  SUBROUTINE SPEED_FUNCTION_FIBER_DIRECTION(EQUATIONS_SET,NODE_A,NODE_B,TIME,ERR,ERROR)
+    !Argument variables
+    TYPE(EQUATIONS_SET_TYPE), POINTER :: EQUATIONS_SET
+    INTEGER(INTG), INTENT(IN) :: NODE_A
+    INTEGER(INTG), INTENT(IN) :: NODE_B
+    REAL(DP), INTENT(OUT) :: TIME
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local variables
+    TYPE(FIELD_TYPE), POINTER :: DEPENDENT_FIELD, MATERIALS_FIELD, GEOMETRIC_FIELD, FIBRE_FIELD
+    REAL(DP) :: time_a, time_b
+    REAL(DP), ALLOCATABLE :: fibre_direction_matrix_a(:,:), fibre_direction_matrix_b(:,:)
+    REAL(DP), ALLOCATABLE :: fibre_direction_a(:), fibre_direction_b(:)
+    REAL(DP), ALLOCATABLE :: speed_a(:), speed_b(:)
+    REAL(DP), ALLOCATABLE :: dist(:)
+    INTEGER(INTG) :: d
+    REAL(DP), ALLOCATABLE :: coordinates_a(:), coordinates_b(:)
+    INTEGER(INTG) :: num_dims
+    
+    num_dims = 3
+    
+    ALLOCATE(coordinates_a(num_dims),STAT=ERR)
+    ALLOCATE(coordinates_b(num_dims),STAT=ERR)
+    ALLOCATE(dist(num_dims),STAT=ERR)
+    ALLOCATE(fibre_direction_a(num_dims),STAT=ERR)
+    ALLOCATE(fibre_direction_b(num_dims),STAT=ERR)
+    ALLOCATE(fibre_direction_matrix_a(num_dims,num_dims),STAT=ERR)
+    ALLOCATE(fibre_direction_matrix_b(num_dims,num_dims),STAT=ERR)
+    ALLOCATE(speed_a(num_dims),STAT=ERR)
+    ALLOCATE(speed_b(num_dims),STAT=ERR)
+    
+    DEPENDENT_FIELD=>EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD
+    MATERIALS_FIELD=>EQUATIONS_SET%MATERIALS%MATERIALS_FIELD
+    GEOMETRIC_FIELD=>EQUATIONS_SET%GEOMETRY%GEOMETRIC_FIELD
+    FIBRE_FIELD=>EQUATIONS_SET%GEOMETRY%FIBRE_FIELD
+    
+    DO d=1,num_dims
+      CALL FIELD_PARAMETER_SET_GET_NODE(GEOMETRIC_FIELD,FIELD_U_VARIABLE_TYPE,FIELD_VALUES_SET_TYPE,1,0,NODE_A, &
+        & d,coordinates_a(d),ERR,ERROR,*999)
+      CALL FIELD_PARAMETER_SET_GET_NODE(GEOMETRIC_FIELD,FIELD_U_VARIABLE_TYPE,FIELD_VALUES_SET_TYPE,1,0,NODE_B, &
+        & d,coordinates_b(d),ERR,ERROR,*999)
+      dist(d) = coordinates_b(d)-coordinates_a(d)
+      
+      CALL FIELD_PARAMETER_SET_GET_NODE(FIBRE_FIELD,FIELD_U_VARIABLE_TYPE,FIELD_VALUES_SET_TYPE,1,0,NODE_A, &
+        & d,fibre_direction_a(d),ERR,ERROR,*999)
+      CALL FIELD_PARAMETER_SET_GET_NODE(FIBRE_FIELD,FIELD_U_VARIABLE_TYPE,FIELD_VALUES_SET_TYPE,1,0,NODE_B, &
+        & d,fibre_direction_b(d),ERR,ERROR,*999)
+    ENDDO
+    
+    !TODO: Get fiber direction A
+    !TODO: Get speed A
+    CALL SOLVER_FMM_SOLVE_CREATE_FIBER_MATRIX_TRANSPOSED(fibre_direction_a, fibre_direction_matrix_a, ERR, ERROR, *999)
+    CALL SOLVER_FMM_SOLVE_CALCULATE_TRAVEL_TIME(fibre_direction_matrix_a, dist, speed_b, time_a, ERR, ERROR, *999)
+    
+    !TODO: Get fiber direction B
+    !TODO: Get speed B
+    CALL SOLVER_FMM_SOLVE_CREATE_FIBER_MATRIX_TRANSPOSED(fibre_direction_b, fibre_direction_matrix_b, ERR, ERROR, *999)
+    CALL SOLVER_FMM_SOLVE_CALCULATE_TRAVEL_TIME(fibre_direction_matrix_b, dist, speed_b, time_b, ERR, ERROR, *999)
+    
+    TIME = (TIME_A + TIME_B) / 2.0_DP
+    
+999 RETURN
+    
+  END SUBROUTINE
+
+  !
+  !================================================================================================================================
+  !
+
+  SUBROUTINE SOLVER_FMM_SOLVE_CALCULATE_TRAVEL_TIME(FIBER_DIRECTION_MATRIX,DIST,SPEED,TRAVEL_TIME,ERR,ERROR,*)
+    !Argument variables
+    REAL(DP), ALLOCATABLE :: FIBER_DIRECTION_MATRIX(:,:)
+    REAL(DP), ALLOCATABLE :: DIST(:)
+    REAL(DP), ALLOCATABLE :: SPEED(:)
+    REAL(DP), INTENT(OUT) :: TRAVEL_TIME
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    REAL(DP), DIMENSION(3) :: x
+    REAL(DP) :: vmv
+    
+    CALL ENTERS("SOLVER_FMM_SOLVE_CALCULATE_TRAVEL_TIME",ERR,ERROR,*999)
+    
+    x(1) = DIST(1) * FIBER_DIRECTION_MATRIX(1,1) + DIST(2) * FIBER_DIRECTION_MATRIX(1,2) &
+        & + DIST(3) * FIBER_DIRECTION_MATRIX(1,3)
+    x(2) = DIST(1) * FIBER_DIRECTION_MATRIX(2,1) + DIST(2) * FIBER_DIRECTION_MATRIX(2,2) &
+        & + DIST(3) * FIBER_DIRECTION_MATRIX(2,3)
+    x(3) = DIST(1) * FIBER_DIRECTION_MATRIX(3,1) + DIST(2) * FIBER_DIRECTION_MATRIX(3,2) &
+        & + DIST(3) * FIBER_DIRECTION_MATRIX(3,3)
+    vmv = x(1) * x(1) * SPEED(1) + x(2) * x(2) * SPEED(2) + x(3) * x(3) * SPEED(3)
+    TRAVEL_TIME = SQRT(vmv)
+    
+    CALL EXITS("SOLVER_FMM_SOLVE_CALCULATE_TRAVEL_TIME")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_SOLVE_CALCULATE_TRAVEL_TIME",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_SOLVE_CALCULATE_TRAVEL_TIME")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_FMM_SOLVE_CALCULATE_TRAVEL_TIME
+
+  !
+  !================================================================================================================================
+  !
+
+  SUBROUTINE SOLVER_FMM_SOLVE_CREATE_FIBER_MATRIX_TRANSPOSED(FIBER_DIRECTION,MATRIX,ERR,ERROR,*)
+    !Argument variables
+    REAL(DP), ALLOCATABLE :: FIBER_DIRECTION(:)
+    REAL(DP), ALLOCATABLE :: MATRIX(:,:)
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    REAL(DP) :: normInv, projection, normInvSecond
+    REAL(DP), DIMENSION(3) :: orthoVector
+
+    CALL ENTERS("SOLVER_FMM_SOLVE_CREATE_FIBER_MATRIX_TRANSPOSED",ERR,ERROR,*999)
+    
+    ! 1st vector: normalized fiber direction
+    normInv = 1.0_DP / SQRT(FIBER_DIRECTION(1) * FIBER_DIRECTION(1) + FIBER_DIRECTION(2) * FIBER_DIRECTION(2) &
+        & + FIBER_DIRECTION(3) * FIBER_DIRECTION(3))
+    MATRIX(1,1) = FIBER_DIRECTION(1) * normInv
+    MATRIX(1,2) = FIBER_DIRECTION(2) * normInv
+    MATRIX(1,3) = FIBER_DIRECTION(3) * normInv
+    IF (ABS(normInv - 1.0_DP) > 0.001_DP) THEN
+      !TODO: Give a warning here
+    ENDIF
+    
+    ! 2nd and 3rd vector: create an orthonormal system
+    
+    ! 2nd vector: create a non-collinear vector, orthogonalize it to the first one and normalize it
+    IF (ABS(FIBER_DIRECTION(1)) < 0.5) THEN
+      orthoVector(1) = 1
+      orthoVector(2) = 0
+      orthoVector(3) = 0
+    ELSE
+      orthoVector(1) = 0
+      orthoVector(2) = 1
+      orthoVector(3) = 0
+    ENDIF
+    projection = orthoVector(1) * MATRIX(1,1) + orthoVector(2) * MATRIX(1,2) + orthoVector(3) * MATRIX(1,3)
+    orthoVector(1) = orthoVector(1) - projection * MATRIX(1,1)
+    orthoVector(2) = orthoVector(2) - projection * MATRIX(1,2)
+    orthoVector(3) = orthoVector(3) - projection * MATRIX(1,3)
+    normInvSecond = 1.0_DP / SQRT(orthoVector(1) * orthoVector(1) + orthoVector(2) * orthoVector(2) &
+        & + orthoVector(3) * orthoVector(3))
+    MATRIX(2,1) = orthoVector(1) * normInvSecond
+    MATRIX(2,2) = orthoVector(2) * normInvSecond
+    MATRIX(2,3) = orthoVector(3) * normInvSecond
+    
+    ! 3rd vector: cross product of the first two
+    MATRIX(3,1) = MATRIX(1,2) * MATRIX(2,3) - MATRIX(1,3) * MATRIX(2,2)
+    MATRIX(3,2) = MATRIX(1,3) * MATRIX(2,1) - MATRIX(1,1) * MATRIX(2,3)
+    MATRIX(3,3) = MATRIX(1,1) * MATRIX(2,2) - MATRIX(1,2) * MATRIX(2,1)
+    
+    CALL EXITS("SOLVER_FMM_SOLVE_CREATE_FIBER_MATRIX_TRANSPOSED")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_SOLVE_CREATE_FIBER_MATRIX_TRANSPOSED",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_SOLVE_CREATE_FIBER_MATRIX_TRANSPOSED")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_FMM_SOLVE_CREATE_FIBER_MATRIX_TRANSPOSED
+
+  !
+  !================================================================================================================================
+  !
+
+  SUBROUTINE SOLVER_FMM_SOLVE_INTERNAL(DEPENDENT_FIELD, MATERIALS_FIELD, GEOMETRIC_FIELD, FIBRE_FIELD, ERR, ERROR, *)
+    !Argument variables
+    TYPE(FIELD_TYPE), POINTER :: DEPENDENT_FIELD, MATERIALS_FIELD, GEOMETRIC_FIELD, FIBRE_FIELD
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+
+
+    CALL EXITS("SOLVER_FMM_SOLVE_INTERNAL")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_SOLVE_INTERNAL",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_SOLVE_INTERNAL")
+    RETURN 1
+
+  END SUBROUTINE SOLVER_FMM_SOLVE_INTERNAL
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Adds equations sets to solver. \see OPENCMISS::CMISSSolverEquationsSetAdd
+  SUBROUTINE SOLVER_EQUATIONS_SET_ADD(SOLVER,EQUATIONS_SET,EQUATIONS_SET_INDEX,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER !<A pointer the solver to add the equations set to.
+    TYPE(EQUATIONS_SET_TYPE), POINTER :: EQUATIONS_SET !<A pointer to the equations set to add
+    INTEGER(INTG), INTENT(OUT) :: EQUATIONS_SET_INDEX !<On exit, the index of the equations set that has been added
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    TYPE(EQUATIONS_SET_PTR_TYPE), ALLOCATABLE :: NEW_EQUATIONS_SETS(:)
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER
+    INTEGER(INTG) :: equations_set_idx
+    
+    CALL ENTERS("SOLVER_EQUATIONS_SET_ADD",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(SOLVER)) THEN
+      IF(SOLVER%SOLVER_FINISHED) THEN
+        CALL FLAG_ERROR("Solver equations has already been finished.",ERR,ERROR,*999)
+      ELSE
+        SELECT CASE(SOLVER%SOLVE_TYPE)
+        CASE(SOLVER_STATE_TYPE)
+          STATE_SOLVER=>SOLVER%STATE_SOLVER
+          IF(ASSOCIATED(STATE_SOLVER)) THEN
+            IF(ASSOCIATED(EQUATIONS_SET)) THEN
+              ALLOCATE(NEW_EQUATIONS_SETS(STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS+1), STAT=ERR)
+              IF(ERR/=0) CALL FLAG_ERROR("Could not allocate equations sets.",ERR,ERROR,*999)
+              DO equations_set_idx=1,STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS
+                NEW_EQUATIONS_SETS(equations_set_idx)%PTR=>STATE_SOLVER%EQUATIONS_SETS(equations_set_idx)%PTR
+              ENDDO !equations_set_idx
+              CALL MOVE_ALLOC(NEW_EQUATIONS_SETS,STATE_SOLVER%EQUATIONS_SETS)
+              STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS=STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS+1
+              EQUATIONS_SET_INDEX=STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS
+            ELSE
+              CALL FLAG_ERROR("Equations set is not associated.",ERR,ERROR,*999)
+            ENDIF
+          ELSE
+            CALL FLAG_ERROR("State solver is not associated.",ERR,ERROR,*999)
+          ENDIF
+        CASE DEFAULT
+          LOCAL_ERROR="Cannot add equations set to a solver of type "// &
+            & TRIM(NUMBER_TO_VSTRING(SOLVER%SOLVE_TYPE,"*",ERR,ERROR))// &
+            & "."
+          CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+        END SELECT
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("Solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+        
+    CALL EXITS("SOLVER_EQUATIONS_SET_ADD")
+    RETURN
+999 IF(ALLOCATED(NEW_EQUATIONS_SETS)) DEALLOCATE(NEW_EQUATIONS_SETS)
+    CALL ERRORS("SOLVER_EQUATIONS_SET_ADD",ERR,ERROR)    
+    CALL EXITS("SOLVER_EQUATIONS_SET_ADD")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_EQUATIONS_SET_ADD
 
   !
   !================================================================================================================================
@@ -15275,6 +16060,8 @@ CONTAINS
               CALL SOLVER_OPTIMISER_INITIALISE(SOLVER,ERR,ERROR,*999)
             CASE(SOLVER_CELLML_EVALUATOR_TYPE)
               CALL SOLVER_CELLML_EVALUATOR_INITIALISE(SOLVER,ERR,ERROR,*999)
+            CASE(SOLVER_STATE_TYPE)
+              CALL SOLVER_STATE_INITIALISE(SOLVER,ERR,ERROR,*999)
             CASE DEFAULT
               LOCAL_ERROR="The specified solve type of "//TRIM(NUMBER_TO_VSTRING(SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
               CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
@@ -15295,6 +16082,8 @@ CONTAINS
               CALL SOLVER_OPTIMISER_FINALISE(SOLVER%OPTIMISER_SOLVER,ERR,ERROR,*999)
             CASE(SOLVER_CELLML_EVALUATOR_TYPE)
               CALL SOLVER_CELLML_EVALUATOR_FINALISE(SOLVER%CELLML_EVALUATOR_SOLVER,ERR,ERROR,*999)
+            CASE(SOLVER_STATE_TYPE)
+              CALL SOLVER_STATE_FINALISE(SOLVER%STATE_SOLVER,ERR,ERROR,*999)
             CASE DEFAULT
               LOCAL_ERROR="The solver solve type of "//TRIM(NUMBER_TO_VSTRING(SOLVER%SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
               CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
@@ -15323,6 +16112,8 @@ CONTAINS
       CALL SOLVER_EIGENPROBLEM_FINALISE(SOLVER%EIGENPROBLEM_SOLVER,DUMMY_ERR,DUMMY_ERROR,*998)
     CASE(SOLVER_OPTIMISER_TYPE)
       CALL SOLVER_OPTIMISER_FINALISE(SOLVER%OPTIMISER_SOLVER,DUMMY_ERR,DUMMY_ERROR,*998)
+    CASE(SOLVER_STATE_TYPE)
+      CALL SOLVER_STATE_FINALISE(SOLVER%STATE_SOLVER,DUMMY_ERR,DUMMY_ERROR,*998)
     END SELECT
 998 CALL ERRORS("SOLVER_TYPE_SET",ERR,ERROR)    
     CALL EXITS("SOLVER_TYPE_SET")

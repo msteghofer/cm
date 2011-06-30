@@ -83,6 +83,7 @@ MODULE OPENCMISS
   !USE ISO_C_BINDING
   USE ISO_VARYING_STRING
   USE KINDS
+  USE MESH_IO_ROUTINES
   USE MESH_ROUTINES
   USE NODE_ROUTINES
   USE PROBLEM_CONSTANTS
@@ -353,6 +354,8 @@ MODULE OPENCMISS
   PUBLIC CMISSSolverEquationsType,CMISSSolverEquationsTypeFinalise,CMISSSolverEquationsTypeInitialise
 
   PUBLIC CMISSComputationalWorkGroupType
+  
+  PUBLIC CMISSSolverEquationsSetAdd
   
 
 !!==================================================================================================================================
@@ -1974,6 +1977,8 @@ MODULE OPENCMISS
   PUBLIC CMISS_POST_PROCESS_DATA,CMISS_NUMBER_OF_INPUT_NODES,CMISS_PRE_PROCESS_INFORMATION
   PUBLIC CMISS_SOLVE_PROBLEM_FMM_CONNECTIVITY,CMISS_SOLVE_PROBLEM_GEODESIC,CMISS_SOLVE_PROBLEM_GEODESIC_CONNECTIVITY
   PUBLIC CMISS_SOLVE_PROBLEM_FMM,CMISS_FIND_MINIMAX
+  
+  PUBLIC CMISSReadTetgenMesh,CMISSWriteVTKMesh
 
 !!==================================================================================================================================
 !!
@@ -2000,6 +2005,7 @@ MODULE OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetFittingClass = EQUATIONS_SET_FITTING_CLASS !<Fitting equations set class \see OPENCMISS_EquationsSetClasses,OPENCMISS     
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetOptimisationClass = EQUATIONS_SET_OPTIMISATION_CLASS !<Optimisation equations set class \see OPENCMISS_EquationsSetClasses,OPENCMISS     
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetMultiPhysicsClass = EQUATIONS_SET_MULTI_PHYSICS_CLASS !<Multi Physics equations set class \see OPENCMISS_EquationsSetClasses,OPENCMISS   
+  INTEGER(INTG), PARAMETER :: CMISSEquationsSetFMMClass = EQUATIONS_SET_FMM_CLASS !<Classical Field equations set class \see OPENCMISS_EquationsSetClasses,OPENCMISS   
   !>@}
   !> \addtogroup OPENCMISS_EquationsSetTypes OPENCMISS::EquationsSet::Types
   !> \brief Equations set Types.
@@ -2018,6 +2024,7 @@ MODULE OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetMagnetoStaticType = EQUATIONS_SET_MAGNETOSTATIC_TYPE !<Magnetostatic equations set type \see OPENCMISS_EquationsSetTypes,OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetMaxwellsEquationType = EQUATIONS_SET_MAXWELLS_EQUATIONS_TYPE !<Maxwells equation equations set type \see OPENCMISS_EquationsSetTypes,OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetLaplaceEquationType = EQUATIONS_SET_LAPLACE_EQUATION_TYPE !<Laplace equation equations set type \see OPENCMISS_EquationsSetTypes,OPENCMISS
+  INTEGER(INTG), PARAMETER :: CMISSEquationsSetHJEquationType = EQUATIONS_SET_HJ_EQUATION_TYPE !<HJ equation equations set type \see OPENCMISS_EquationsSetTypes,OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetPoissonEquationType = EQUATIONS_SET_POISSON_EQUATION_TYPE !<Poisson equation equations set type \see OPENCMISS_EquationsSetTypes,OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetHelmholtzEquationType = EQUATIONS_SET_HELMHOLTZ_EQUATION_TYPE !<Helmholtz equation equations set type \see OPENCMISS_EquationsSetTypes,OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetWaveEquationType = EQUATIONS_SET_WAVE_EQUATION_TYPE !<Wave equation equations set type \see OPENCMISS_EquationsSetTypes,OPENCMISS
@@ -2106,6 +2113,7 @@ MODULE OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetStandardLaplaceSubtype = EQUATIONS_SET_STANDARD_LAPLACE_SUBTYPE !<Standard Laplace equations set subtype \see OPENCMISS_EquationsSetSubtypes,OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetGeneralisedLaplaceSubtype = EQUATIONS_SET_GENERALISED_LAPLACE_SUBTYPE !<Generalised Laplace equations set subtype \see OPENCMISS_EquationsSetSubtypes,OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetMovingMeshLaplaceSubtype = EQUATIONS_SET_MOVING_MESH_LAPLACE_SUBTYPE !<Moving mesh Laplace equations set subtype \see OPENCMISS_EquationsSetSubtypes,OPENCMISS
+  INTEGER(INTG), PARAMETER :: CMISSEquationsSetStandardHJSubtype = EQUATIONS_SET_STANDARD_HJ_SUBTYPE !<Standard HJ equations set subtype \see OPENCMISS_EquationsSetSubtypes,OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetStaticPoiseuilleSubtype = EQUATIONS_SET_STATIC_POISEUILLE_SUBTYPE !<Static Poiseuille equations set subtype \see OPENCMISS_EquationsSetSubtypes,OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetDynamicPoiseuilleSubtype = EQUATIONS_SET_DYNAMIC_POISEUILLE_SUBTYPE !<Dynamic Poiseuille equations set subtype \see OPENCMISS_EquationsSetSubtypes,OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSEquationsSetLinearPressurePoissonSubtype = EQUATIONS_SET_LINEAR_PRESSURE_POISSON_SUBTYPE !<Vector source Poisson equations set subtype \see OPENCMISS_EquationsSetSubtypes,OPENCMISS
@@ -2429,7 +2437,7 @@ MODULE OPENCMISS
   PUBLIC CMISSEquationsSetNoClass,CMISSEquationsSetElasticityClass,CMISSEquationsSetFluidMechanicsClass, &
     & CMISSEquationsSetElectroMechanicsClass,CMISSEquationsSetClassicalFieldClass,CMISSEquationsSetBioelectricsClass, &
     & CMISSEquationsSetModalClass,CMISSEquationsSetFittingClass,CMISSEquationsSetOptimisationClass, &
-    & CMISSEquationsSetMultiPhysicsClass
+    & CMISSEquationsSetMultiPhysicsClass,CMISSEquationsSetFMMClass
 
   PUBLIC CMISSEquationsSetNoType,CMISSEquationsSetLinearElasticityType,CMISSEquationsSetFiniteElasticityType, &
     & CMISSEquationsSetStokesEquationType,CMISSEquationsSetNavierStokesEquationType,CMISSEquationsSetDarcyEquationType, &
@@ -2440,8 +2448,8 @@ MODULE OPENCMISS
     & CMISSEquationsSetHelmholtzEquationType,CMISSEquationsSetWaveEquationType,CMISSEquationsSetDiffusionEquationType, &
     & CMISSEquationsSetAdvectionDiffusionEquationType,CMISSEquationsSetReactionDiffusionEquationType, &
     & CMISSEquationsSetBiharmonicEquationType,CMISSEquationsSetMonodomainEquationType,CMISSEquationsSetBidomainEquationType, &
-    & CMISSEquationsSetLinearElasticModalType,CMISSEquationsSetDataFittingEquationType,CMISSEquationsSetMonodomainSSEquationType
-
+    & CMISSEquationsSetLinearElasticModalType,CMISSEquationsSetDataFittingEquationType,CMISSEquationsSetMonodomainSSEquationType, &
+    & CMISSEquationsSetHJEquationType
   PUBLIC CMISSEquationsSetFiniteElasticityDarcyType, &
     & CMISSEquationsSetFiniteElasticityStokesType, CMISSEquationsSetFiniteElasticityNavierStokesType, &
     & CMISSEquationsSetDiffusionDiffusionType, CMISSEquationsSetDiffusionAdvectionDiffusionType
@@ -2467,6 +2475,7 @@ MODULE OPENCMISS
     & CMISSEquationsSetTransientALEDarcySubtype,CMISSEquationsSetMultiCompartmentDarcySubtype, &
     & CMISSEquationsSetStandardLaplaceSubtype,CMISSEquationsSetMovingMeshLaplaceSubtype, &
     & CMISSEquationsSetGeneralisedLaplaceSubtype,CMISSEquationsSetConstantSourcePoissonSubtype, &
+    & CMISSEquationsSetStandardHJSubtype, &
     & CMISSEquationsSetLinearPressurePoissonSubtype, CMISSEquationsSetNonlinearPressurePoissonSubtype, &
     & CMISSEquationsSetALEPressurePoissonSubtype, CMISSEquationsSetFittedPressurePoissonSubtype,&
     & CMISSEquationsSetLinearSourcePoissonSubtype,CMISSEquationsSetQuadraticSourcePoissonSubtype, &
@@ -4462,6 +4471,7 @@ MODULE OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSProblemFittingClass = PROBLEM_FITTING_CLASS !<Fitting problem class \see OPENCMISS_ProblemClasses,OPENCMISS 
   INTEGER(INTG), PARAMETER :: CMISSProblemOptimisationClass = PROBLEM_OPTIMISATION_CLASS !<Optimisation problem class \see OPENCMISS_ProblemClasses,OPENCMISS 
   INTEGER(INTG), PARAMETER :: CMISSProblemMultiPhysicsClass = PROBLEM_MULTI_PHYSICS_CLASS !<Multi physics problem class \see OPENCMISS_ProblemClasses,OPENCMISS 
+  INTEGER(INTG), PARAMETER :: CMISSProblemFMMClass = PROBLEM_FMM_CLASS !<Fast Marching Method problem class \see OPENCMISS_ProblemClasses,OPENCMISS 
   !>@}
   !> \addtogroup OPENCMISS_ProblemTypes OPENCMISS::Problem::Types
   !> \brief Problem Types.
@@ -4500,6 +4510,7 @@ MODULE OPENCMISS
  
   INTEGER(INTG), PARAMETER :: CMISSProblemMonodomainStrangSplittingEquationType = &
     & PROBLEM_MONODOMAIN_STRANG_SPLITTING_EQUATION_TYPE !<Monodomain equation problem type \see OPENCMISS_ProblemTypes,OPENCMISS
+  INTEGER(INTG), PARAMETER :: CMISSProblemHJEquationType = PROBLEM_HJ_EQUATION_TYPE !<HJ problem type \see OPENCMISS_ProblemTypes,OPENCMISS 
   !>@}
   !> \addtogroup OPENCMISS_ProblemSubTypes OPENCMISS::Problem::Subtypes
   !> \brief Problem Subtypes.
@@ -4611,6 +4622,8 @@ MODULE OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSProblemMonodomainBuenoOrovioSubtype = PROBLEM_MONODOMAIN_BUENOOROVIO_SUBTYPE !<Generalised Laplace problem subtype \see OPENCMISS_ProblemSubtypes,OPENCMISS
   INTEGER(INTG), PARAMETER :: CMISSProblemMonodomainTenTusscher06Subtype = PROBLEM_MONODOMAIN_TENTUSSCHER06_SUBTYPE !<Generalised Laplace problem subtype \see OPENCMISS_ProblemSubtypes,OPENCMISS
 
+  INTEGER(INTG), PARAMETER :: CMISSProblemStandardHJSubtype = PROBLEM_STANDARD_HJ_SUBTYPE !<Standard HJ problem subtype \see OPENCMISS_ProblemSubtypes,OPENCMISS
+
 
   !>@}
   !> \addtogroup OPENCMISS_ProblemControlLoopTypes OPENCMISS::Problem::ControlLoopTypes
@@ -4633,7 +4646,7 @@ MODULE OPENCMISS
 
   PUBLIC CMISSProblemNoClass,CMISSProblemElasticityClass,CMISSProblemFluidMechanicsClass,CMISSProblemElectromagneticsClass, &
     & CMISSProblemClassicalFieldClass,CMISSProblemBioelectricsClass,CMISSProblemModalClass,CMISSProblemFittingClass, &
-    & CMISSProblemOptimisationClass,CMISSProblemMultiPhysicsClass
+    & CMISSProblemOptimisationClass,CMISSProblemMultiPhysicsClass,CMISSProblemFMMClass
 
   PUBLIC CMISSProblemNoType
 
@@ -4658,7 +4671,9 @@ MODULE OPENCMISS
     & CMISSProblemFiniteElasticityStokesType, CMISSProblemFiniteElasticityNavierStokesType, &
     & CMISSProblemDiffusionDiffusionType, CMISSProblemDiffusionAdvectionDiffusionType, &
     & CMISSProblemMultiCompartmentTransportType,CMISSProblemFiniteElasticityFluidPressureType 
-
+  
+  PUBLIC CMISSProblemHJEquationType
+  
   PUBLIC CMISSProblemNoSubtype
 
   PUBLIC CMISSProblemStaticStokesSubtype,CMISSProblemLaplaceStokesSubtype,CMISSProblemTransientStokesSubtype, &
@@ -4722,6 +4737,10 @@ MODULE OPENCMISS
    & CMISSProblemStandardMultiCompartmentTransportSubtype,CMISSProblemStandardElasticityFluidPressureSubtype
 
   PUBLIC CMISSProblemQuasistaticFiniteElasticitySubtype,CMISSProblemFiniteElasticityCellMLSubtype
+  
+  
+  PUBLIC CMISSProblemStandardHJSubtype
+  
 !!==================================================================================================================================
 !!
 !! PROBLEM_ROUTINES
@@ -46419,6 +46438,38 @@ CONTAINS
 &CONNECTIVITY_LIST,ELEMENT_LIST,TOTAL_NUMBER_OF_ELEMENTS,NUMBER_OF_NODES_PER_ELEMENT,Err)
   END SUBROUTINE CMISS_POST_PROCESS_DATA
 
+  !  
+  !================================================================================================================================
+  !
+
+  SUBROUTINE CMISSReadTetgenMesh(InputFileName,WorldRegion,Mesh,Region,GeometricField,Err)
+    !subroutine parameters
+    CHARACTER (LEN=300), INTENT(IN) :: InputFileName
+    TYPE(CMISSRegionType), INTENT(IN) :: WorldRegion
+    TYPE(CMISSMeshType), INTENT(OUT) :: Mesh
+    TYPE(CMISSRegionType), INTENT(OUT) :: Region
+    TYPE(CMISSFieldType), INTENT(OUT) :: GeometricField
+    INTEGER(INTG), INTENT(OUT) :: Err
+    
+    TYPE(VARYING_STRING) :: INPUT_FILE_NAME_VARY
+    INTEGER(INTG) :: TEXT_LENGTH
+    
+    CALL ENTERS("CMISSReadTetgenMesh",Err,ERROR,*999)
+    
+    TEXT_LENGTH = INDEX(InputFileName,' ') - 1
+    INPUT_FILE_NAME_VARY=InputFileName(1:TEXT_LENGTH)
+    CALL READ_TETGEN_MESH(INPUT_FILE_NAME_VARY,WorldRegion%REGION,Mesh%MESH,GeometricField%FIELD,Err,ERROR,*999)
+    Region%REGION=>Mesh%MESH%REGION
+    
+    CALL EXITS("CMISSReadTetgenMesh")
+    RETURN
+999 CALL ERRORS("CMISSReadTetgenMesh",Err,ERROR)
+    CALL EXITS("CMISSReadTetgenMesh")
+    CALL CMISS_HANDLE_ERROR(Err,ERROR)
+    RETURN
+    
+  END SUBROUTINE CMISSReadTetgenMesh
+
 
   !  
   !================================================================================================================================
@@ -47065,5 +47116,62 @@ CONTAINS
   !
   !================================================================================================================================
   !
+
+  SUBROUTINE CMISSWriteVTKMesh(OutputFileName,Mesh,GeometricField,Err)
+    !subroutine parameters
+    CHARACTER (LEN=300), INTENT(IN) :: OutputFileName
+    TYPE(CMISSMeshType), INTENT(IN) :: Mesh
+    TYPE(CMISSFieldType), INTENT(IN) :: GeometricField
+    INTEGER(INTG), INTENT(OUT) :: Err
+    
+    TYPE(VARYING_STRING) :: OUTPUT_FILE_NAME_VARY
+    INTEGER(INTG) :: TEXT_LENGTH
+    
+    CALL ENTERS("CMISSWriteVTKMesh",Err,ERROR,*999)
+    
+    TEXT_LENGTH = INDEX(OutputFileName,' ') - 1
+    OUTPUT_FILE_NAME_VARY=OutputFileName(1:TEXT_LENGTH)
+    CALL WRITE_VTK_MESH(OUTPUT_FILE_NAME_VARY,Mesh%MESH,GeometricField%FIELD,Err,ERROR,*999)
+    
+    CALL EXITS("CMISSWriteVTKMesh")
+    RETURN
+999 CALL ERRORS("CMISSWriteVTKMesh",Err,ERROR)
+    CALL EXITS("CMISSWriteVTKMesh")
+    CALL CMISS_HANDLE_ERROR(Err,ERROR)
+    RETURN
+    
+  END SUBROUTINE CMISSWriteVTKMesh
+
+
+  !  
+  !================================================================================================================================
+  !
+
+  !>
+  SUBROUTINE CMISSSolverEquationsSetAdd(Solver,EquationsSet,EquationsSetIndex,Err)
+  
+    !Argument variables
+    TYPE(CMISSSolverType), INTENT(IN) :: Solver !<
+    TYPE(CMISSEquationsSetType), INTENT(IN) :: EquationsSet !<
+    INTEGER(INTG), INTENT(OUT) :: EquationsSetIndex !<
+    INTEGER(INTG), INTENT(OUT) :: Err !<The error code.
+    !Local variables
+  
+    CALL ENTERS("CMISSSolverEquationsSetAdd",Err,ERROR,*999)
+ 
+    CALL SOLVER_EQUATIONS_SET_ADD(Solver%SOLVER,EquationsSet%EQUATIONS_SET,EquationsSetIndex,Err,ERROR,*999)
+
+    CALL EXITS("CMISSSolverEquationsSetAdd")
+    RETURN
+999 CALL ERRORS("CMISSSolverEquationsSetAdd",Err,ERROR)
+    CALL EXITS("CMISSSolverEquationsSetAdd")
+    CALL CMISS_HANDLE_ERROR(Err,ERROR)
+    RETURN
+    
+  END SUBROUTINE CMISSSolverEquationsSetAdd
+
+  !  
+  !================================================================================================================================
+  ! 
 
 END MODULE OPENCMISS
