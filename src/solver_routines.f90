@@ -455,6 +455,8 @@ MODULE SOLVER_ROUTINES
 
   PUBLIC SOLVER_DYNAMIC_TIMES_SET
 
+  PUBLIC SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_GET
+
   PUBLIC SOLVER_EQUATIONS_CREATE_FINISH,SOLVER_EQUATIONS_CREATE_START
 
   PUBLIC SOLVER_EQUATIONS_DESTROY
@@ -466,7 +468,9 @@ MODULE SOLVER_ROUTINES
   PUBLIC SOLVER_EQUATIONS_LINEARITY_TYPE_SET
 
   PUBLIC SOLVER_EQUATIONS_SPARSITY_TYPE_SET
-  
+
+  PUBLIC SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_FINISH,SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_START
+
   PUBLIC SOLVER_EQUATIONS_TIME_DEPENDENCE_TYPE_SET
 
   PUBLIC SOLVER_LABEL_GET,SOLVER_LABEL_SET
@@ -5904,6 +5908,46 @@ CONTAINS
   !================================================================================================================================
   !
 
+  !>Gets the boundary conditions for solver equations. \see OPENCMISS_CMISSSolverEquationsBoundaryConditionsGet
+  SUBROUTINE SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_GET(SOLVER_EQUATIONS,BOUNDARY_CONDITIONS,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(SOLVER_EQUATIONS_TYPE), POINTER :: SOLVER_EQUATIONS !<A pointer to the solver equations to get the boundary conditions for
+    TYPE(BOUNDARY_CONDITIONS_TYPE), POINTER :: BOUNDARY_CONDITIONS !<On exit, a pointer to the boundary conditions for the specified solver equations. Must not be associated on entry
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+
+    CALL ENTERS("SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_GET",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(SOLVER_EQUATIONS)) THEN
+      IF(SOLVER_EQUATIONS%SOLVER_EQUATIONS_FINISHED) THEN
+        IF(ASSOCIATED(BOUNDARY_CONDITIONS)) THEN
+          CALL FLAG_ERROR("Boundary conditions is already associated.",ERR,ERROR,*999)
+        ELSE
+          BOUNDARY_CONDITIONS=>SOLVER_EQUATIONS%BOUNDARY_CONDITIONS
+          IF(.NOT.ASSOCIATED(BOUNDARY_CONDITIONS)) CALL FLAG_ERROR("Solver equations boundary conditions is not associated.", &
+            & ERR,ERROR,*999)
+        ENDIF
+      ELSE
+        CALL FLAG_ERROR("Solver equations has not been finished.",ERR,ERROR,*999)
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("Solver equations is not associated.",ERR,ERROR,*999)
+    ENDIF
+
+    CALL EXITS("SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_GET")
+    RETURN
+999 CALL ERRORS("SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_GET",ERR,ERROR)
+    CALL EXITS("SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_GET")
+    RETURN 1
+
+  END SUBROUTINE SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_GET
+
+  !
+  !================================================================================================================================
+  !
+
   !>Finishes the process of creating solver equations
   SUBROUTINE SOLVER_EQUATIONS_CREATE_FINISH(SOLVER_EQUATIONS,ERR,ERROR,*)
 
@@ -5913,7 +5957,6 @@ CONTAINS
     TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
     !Local Variables
     TYPE(SOLVER_TYPE), POINTER :: SOLVER
-    TYPE(VARYING_STRING) :: LOCAL_ERROR
 
     CALL ENTERS("SOLVER_EQUATIONS_CREATE_FINISH",ERR,ERROR,*998)
 
@@ -5926,29 +5969,6 @@ CONTAINS
           IF(ASSOCIATED(SOLVER%LINKING_SOLVER)) THEN
             CALL FLAG_ERROR("Can not finish solver equations creation for a solver that has been linked.",ERR,ERROR,*999)
           ELSE
-            !Finish of the solver mapping
-            !IF (.NOT. (SOLVER%SOLVE_TYPE==SOLVER_DYNAMIC_TYPE)) THEN
-              CALL SOLVER_MAPPING_CREATE_FINISH(SOLVER_EQUATIONS%SOLVER_MAPPING,ERR,ERROR,*999)
-            !ENDIF
-            !Now finish off with the solver specific actions
-            SELECT CASE(SOLVER%SOLVE_TYPE)
-            CASE(SOLVER_LINEAR_TYPE)
-              CALL SOLVER_LINEAR_CREATE_FINISH(SOLVER%LINEAR_SOLVER,ERR,ERROR,*999)
-            CASE(SOLVER_NONLINEAR_TYPE)
-              CALL SOLVER_NONLINEAR_CREATE_FINISH(SOLVER%NONLINEAR_SOLVER,ERR,ERROR,*999)
-            CASE(SOLVER_DYNAMIC_TYPE)
-              PRINT *,"DYNAMIC - Falsch!"
-              CALL SOLVER_DYNAMIC_CREATE_FINISH(SOLVER%DYNAMIC_SOLVER,ERR,ERROR,*999)
-            CASE(SOLVER_DAE_TYPE)
-              CALL SOLVER_DAE_CREATE_FINISH(SOLVER%DAE_SOLVER,ERR,ERROR,*999)
-            CASE(SOLVER_EIGENPROBLEM_TYPE)
-              CALL SOLVER_EIGENPROBLEM_CREATE_FINISH(SOLVER%EIGENPROBLEM_SOLVER,ERR,ERROR,*999)
-            CASE(SOLVER_STATE_TYPE)
-              !CALL SOLVER_EIGENPROBLEM_CREATE_FINISH(SOLVER%EIGENPROBLEM_SOLVER,ERR,ERROR,*999)
-            CASE DEFAULT
-              LOCAL_ERROR="The solver type of "//TRIM(NUMBER_TO_VSTRING(SOLVER%SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
-              CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
-            END SELECT
             SOLVER_EQUATIONS%SOLVER_EQUATIONS_FINISHED=.TRUE.
           ENDIF
         ELSE
@@ -6223,8 +6243,10 @@ CONTAINS
     IF(ASSOCIATED(SOLVER_EQUATIONS)) THEN
       IF(ASSOCIATED(SOLVER_EQUATIONS%SOLVER_MAPPING)) CALL SOLVER_MAPPING_DESTROY(SOLVER_EQUATIONS%SOLVER_MAPPING,ERR,ERROR,*999)
       IF(ASSOCIATED(SOLVER_EQUATIONS%SOLVER_MATRICES)) CALL SOLVER_MATRICES_DESTROY(SOLVER_EQUATIONS%SOLVER_MATRICES,ERR,ERROR,*999)
+      IF(ASSOCIATED(SOLVER_EQUATIONS%BOUNDARY_CONDITIONS)) CALL BOUNDARY_CONDITIONS_DESTROY( &
+          & SOLVER_EQUATIONS%BOUNDARY_CONDITIONS,ERR,ERROR,*999)
     ENDIF
-        
+
     CALL EXITS("SOLVER_EQUATIONS_FINALISE")
     RETURN
 999 CALL ERRORS("SOLVER_EQUATIONS_FINALISE",ERR,ERROR)    
@@ -6261,6 +6283,7 @@ CONTAINS
         SOLVER%SOLVER_EQUATIONS%SPARSITY_TYPE=SOLVER_SPARSE_MATRICES
         NULLIFY(SOLVER%SOLVER_EQUATIONS%SOLVER_MAPPING)
         NULLIFY(SOLVER%SOLVER_EQUATIONS%SOLVER_MATRICES)
+        NULLIFY(SOLVER%SOLVER_EQUATIONS%BOUNDARY_CONDITIONS)
       ENDIF
     ELSE
       CALL FLAG_ERROR("Solver is not associated.",ERR,ERROR,*998)
@@ -6393,6 +6416,110 @@ CONTAINS
    
   END SUBROUTINE SOLVER_EQUATIONS_LINEARITY_TYPE_SET
         
+  !
+  !================================================================================================================================
+  !
+
+  !>Finishes the creation of boundary conditions for the given solver equations
+  SUBROUTINE SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_FINISH(SOLVER_EQUATIONS,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(SOLVER_EQUATIONS_TYPE), POINTER, INTENT(IN) :: SOLVER_EQUATIONS !<A pointer to the solver equations to create boundary conditions for
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(BOUNDARY_CONDITIONS_TYPE), POINTER :: BOUNDARY_CONDITIONS
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+
+    CALL ENTERS("SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_FINISH",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(SOLVER_EQUATIONS)) THEN
+      IF(SOLVER_EQUATIONS%SOLVER_EQUATIONS_FINISHED) THEN
+        BOUNDARY_CONDITIONS=>SOLVER_EQUATIONS%BOUNDARY_CONDITIONS
+        IF(ASSOCIATED(BOUNDARY_CONDITIONS)) THEN
+          CALL BOUNDARY_CONDITIONS_CREATE_FINISH(BOUNDARY_CONDITIONS,ERR,ERROR,*999)
+          SOLVER=>SOLVER_EQUATIONS%SOLVER
+          IF(ASSOCIATED(SOLVER)) THEN
+            IF(ASSOCIATED(SOLVER%LINKING_SOLVER)) THEN
+              CALL FLAG_ERROR("Can not finish solver equations creation for a solver that has been linked.",ERR,ERROR,*999)
+            ELSE
+              !Finish of the solver mapping
+              CALL SOLVER_MAPPING_CREATE_FINISH(SOLVER_EQUATIONS%SOLVER_MAPPING,ERR,ERROR,*999)
+              !Now finish off with the solver specific actions
+              SELECT CASE(SOLVER%SOLVE_TYPE)
+              CASE(SOLVER_LINEAR_TYPE)
+                CALL SOLVER_LINEAR_CREATE_FINISH(SOLVER%LINEAR_SOLVER,ERR,ERROR,*999)
+              CASE(SOLVER_NONLINEAR_TYPE)
+                CALL SOLVER_NONLINEAR_CREATE_FINISH(SOLVER%NONLINEAR_SOLVER,ERR,ERROR,*999)
+              CASE(SOLVER_DYNAMIC_TYPE)
+                CALL SOLVER_DYNAMIC_CREATE_FINISH(SOLVER%DYNAMIC_SOLVER,ERR,ERROR,*999)
+              CASE(SOLVER_DAE_TYPE)
+                CALL SOLVER_DAE_CREATE_FINISH(SOLVER%DAE_SOLVER,ERR,ERROR,*999)
+              CASE(SOLVER_EIGENPROBLEM_TYPE)
+                CALL SOLVER_EIGENPROBLEM_CREATE_FINISH(SOLVER%EIGENPROBLEM_SOLVER,ERR,ERROR,*999)
+              CASE DEFAULT
+                LOCAL_ERROR="The solver type of "//TRIM(NUMBER_TO_VSTRING(SOLVER%SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
+                CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+              END SELECT
+            ENDIF
+          ENDIF
+        ELSE
+          CALL FLAG_ERROR("Solver equations boundary conditions is not associated.",ERR,ERROR,*999)
+        ENDIF
+      ELSE
+        CALL FLAG_ERROR("Solver equations are not finished.",ERR,ERROR,*999)
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("Solver equations is not associated.",ERR,ERROR,*999)
+    ENDIF
+
+    CALL EXITS("SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_FINISH")
+    RETURN
+999 CALL ERRORS("SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_FINISH",ERR,ERROR)
+    CALL EXITS("SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_FINISH")
+    RETURN 1
+
+  END SUBROUTINE SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_FINISH
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Starts the creation of boundary conditions for the given solver equations, and returns a pointer to the boundary conditions
+  SUBROUTINE SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_START(SOLVER_EQUATIONS,BOUNDARY_CONDITIONS,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(SOLVER_EQUATIONS_TYPE), POINTER, INTENT(IN) :: SOLVER_EQUATIONS !<A pointer to the solver equations to create boundary conditions for
+    TYPE(BOUNDARY_CONDITIONS_TYPE), POINTER, INTENT(OUT) :: BOUNDARY_CONDITIONS !<On return, a pointer the boundary conditions
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+
+    CALL ENTERS("SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_START",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(SOLVER_EQUATIONS)) THEN
+      IF(SOLVER_EQUATIONS%SOLVER_EQUATIONS_FINISHED) THEN
+        IF(.NOT.ASSOCIATED(SOLVER_EQUATIONS%BOUNDARY_CONDITIONS)) THEN
+          CALL BOUNDARY_CONDITIONS_CREATE_START(SOLVER_EQUATIONS,BOUNDARY_CONDITIONS,ERR,ERROR,*999)
+        ELSE
+          CALL FLAG_ERROR("Solver equations boundary conditions is already associated.",ERR,ERROR,*999)
+        ENDIF
+      ELSE
+        CALL FLAG_ERROR("Solver equations are not finished.",ERR,ERROR,*999)
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("Solver equations is not associated.",ERR,ERROR,*999)
+    ENDIF
+
+    CALL EXITS("SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_START")
+    RETURN
+999 CALL ERRORS("SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_START",ERR,ERROR)
+    CALL EXITS("SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_START")
+    RETURN 1
+
+  END SUBROUTINE SOLVER_EQUATIONS_BOUNDARY_CONDITIONS_CREATE_START
+
   !
   !================================================================================================================================
   !
@@ -10275,15 +10402,15 @@ CONTAINS
                                       & FIELD_VALUES_SET_TYPE,RHS_PARAMETERS,ERR,ERROR,*999)
                                     RHS_VECTOR=>EQUATIONS_MATRICES%RHS_VECTOR
                                     IF(ASSOCIATED(RHS_VECTOR)) THEN
-                                      BOUNDARY_CONDITIONS=>EQUATIONS_SET%BOUNDARY_CONDITIONS
+                                      BOUNDARY_CONDITIONS=>SOLVER_EQUATIONS%BOUNDARY_CONDITIONS
                                       IF(ASSOCIATED(BOUNDARY_CONDITIONS)) THEN
   !!TODO: what if the equations set doesn't have a RHS vector???
                                         rhs_variable_type=RHS_MAPPING%RHS_VARIABLE_TYPE
                                         RHS_VARIABLE=>RHS_MAPPING%RHS_VARIABLE
                                         RHS_DOMAIN_MAPPING=>RHS_VARIABLE%DOMAIN_MAPPING
                                         EQUATIONS_RHS_VECTOR=>RHS_VECTOR%VECTOR
-                                        RHS_BOUNDARY_CONDITIONS=>BOUNDARY_CONDITIONS%BOUNDARY_CONDITIONS_VARIABLE_TYPE_MAP( &
-                                          & rhs_variable_type)%PTR
+                                        CALL BOUNDARY_CONDITIONS_VARIABLE_GET(BOUNDARY_CONDITIONS,RHS_VARIABLE, &
+                                          & RHS_BOUNDARY_CONDITIONS,ERR,ERROR,*999)
                                         IF(ASSOCIATED(RHS_BOUNDARY_CONDITIONS)) THEN
 
                                           !Call SOLVER_NEUMANN_CALCULATE to check whether any Neumann boundary conditions
@@ -10435,8 +10562,8 @@ CONTAINS
                                                       & variable_type)%VARIABLE
                                                     DEPENDENT_VARIABLE_TYPE=DEPENDENT_VARIABLE%VARIABLE_TYPE
                                                     VARIABLE_DOMAIN_MAPPING=>DEPENDENT_VARIABLE%DOMAIN_MAPPING
-                                                    DEPENDENT_BOUNDARY_CONDITIONS=>BOUNDARY_CONDITIONS% &
-                                                      & BOUNDARY_CONDITIONS_VARIABLE_TYPE_MAP(DEPENDENT_VARIABLE_TYPE)%PTR
+                                                    CALL BOUNDARY_CONDITIONS_VARIABLE_GET(BOUNDARY_CONDITIONS,DEPENDENT_VARIABLE, &
+                                                      & DEPENDENT_BOUNDARY_CONDITIONS,ERR,ERROR,*999)
                                                     variable_dof=DYNAMIC_MAPPING%EQUATIONS_ROW_TO_VARIABLE_DOF_MAPS( &
                                                       & equations_row_number)
                                                     variable_global_dof=VARIABLE_DOMAIN_MAPPING%LOCAL_TO_GLOBAL_MAP(variable_dof)
@@ -10577,7 +10704,7 @@ CONTAINS
                                                               CASE(DISTRIBUTED_MATRIX_COMPRESSED_ROW_STORAGE_TYPE)
                                                                 SPARSITY_INDICES=>DEPENDENT_BOUNDARY_CONDITIONS% &
                                                                   & DIRICHLET_BOUNDARY_CONDITIONS%DYNAMIC_SPARSITY_INDICES( &
-                                                                  & equations_matrix_idx)%PTR
+                                                                  & equations_set_idx,equations_matrix_idx)%PTR
                                                                 IF(ASSOCIATED(SPARSITY_INDICES)) THEN
                                                                   DO equations_row_number2=SPARSITY_INDICES% & 
                                                                     & SPARSE_COLUMN_INDICES(dirichlet_idx), &
@@ -11490,15 +11617,15 @@ CONTAINS
                                       CALL FLAG_ERROR("Equations matrices linear matrices is not associated.",ERR,ERROR,*999)
                                     ENDIF
                                   ENDIF
-                                  BOUNDARY_CONDITIONS=>EQUATIONS_SET%BOUNDARY_CONDITIONS
+                                  BOUNDARY_CONDITIONS=>SOLVER_EQUATIONS%BOUNDARY_CONDITIONS
                                   IF(ASSOCIATED(BOUNDARY_CONDITIONS)) THEN
 !!TODO: what if the equations set doesn't have a RHS vector???
                                     RHS_VARIABLE=>RHS_MAPPING%RHS_VARIABLE
                                     RHS_VARIABLE_TYPE=RHS_VARIABLE%VARIABLE_TYPE
                                     RHS_DOMAIN_MAPPING=>RHS_VARIABLE%DOMAIN_MAPPING
                                     EQUATIONS_RHS_VECTOR=>RHS_VECTOR%VECTOR
-                                    RHS_BOUNDARY_CONDITIONS=>BOUNDARY_CONDITIONS%BOUNDARY_CONDITIONS_VARIABLE_TYPE_MAP( &
-                                      & RHS_VARIABLE_TYPE)%PTR
+                                    CALL BOUNDARY_CONDITIONS_VARIABLE_GET(BOUNDARY_CONDITIONS,RHS_VARIABLE, &
+                                      & RHS_BOUNDARY_CONDITIONS,ERR,ERROR,*999)
                                     IF(ASSOCIATED(RHS_BOUNDARY_CONDITIONS)) THEN
 
                                       !Call SOLVER_NEUMANN_CALCULATE to check whether any Neumann boundary conditions
@@ -11561,8 +11688,8 @@ CONTAINS
                                                 & variable_type)%VARIABLE
                                               DEPENDENT_VARIABLE_TYPE=DEPENDENT_VARIABLE%VARIABLE_TYPE
                                               VARIABLE_DOMAIN_MAPPING=>DEPENDENT_VARIABLE%DOMAIN_MAPPING
-                                              DEPENDENT_BOUNDARY_CONDITIONS=>BOUNDARY_CONDITIONS% &
-                                                & BOUNDARY_CONDITIONS_VARIABLE_TYPE_MAP(DEPENDENT_VARIABLE_TYPE)%PTR
+                                              CALL BOUNDARY_CONDITIONS_VARIABLE_GET(BOUNDARY_CONDITIONS,DEPENDENT_VARIABLE, &
+                                                & DEPENDENT_BOUNDARY_CONDITIONS,ERR,ERROR,*999)
                                               variable_dof=LINEAR_MAPPING%EQUATIONS_ROW_TO_VARIABLE_DOF_MAPS( &
                                                 & equations_row_number,variable_idx)
                                               variable_global_dof=VARIABLE_DOMAIN_MAPPING%LOCAL_TO_GLOBAL_MAP(variable_dof)
@@ -11653,7 +11780,7 @@ CONTAINS
                                                         CASE(DISTRIBUTED_MATRIX_COMPRESSED_ROW_STORAGE_TYPE)
                                                           SPARSITY_INDICES=>DEPENDENT_BOUNDARY_CONDITIONS% &
                                                             & DIRICHLET_BOUNDARY_CONDITIONS%LINEAR_SPARSITY_INDICES( &
-                                                            & equations_matrix_idx)%PTR
+                                                            & equations_set_idx,equations_matrix_idx)%PTR
                                                           IF(ASSOCIATED(SPARSITY_INDICES)) THEN
                                                             DO equations_row_number2=SPARSITY_INDICES%SPARSE_COLUMN_INDICES( &
                                                               & dirichlet_idx),SPARSITY_INDICES%SPARSE_COLUMN_INDICES( &
@@ -17415,8 +17542,8 @@ CONTAINS
         RHS_VARIABLE_TYPE=RHS_VARIABLE%VARIABLE_TYPE
         RHS_DOMAIN_MAPPING=>RHS_VARIABLE%DOMAIN_MAPPING
         IF(ASSOCIATED(RHS_DOMAIN_MAPPING)) THEN
-          RHS_BOUNDARY_CONDITIONS=>BOUNDARY_CONDITIONS%BOUNDARY_CONDITIONS_VARIABLE_TYPE_MAP( &
-            & RHS_VARIABLE_TYPE)%PTR
+          CALL BOUNDARY_CONDITIONS_VARIABLE_GET(BOUNDARY_CONDITIONS,RHS_VARIABLE, &
+            & RHS_BOUNDARY_CONDITIONS,ERR,ERROR,*999)
           IF(ASSOCIATED(RHS_BOUNDARY_CONDITIONS)) THEN
 
 
@@ -17439,7 +17566,7 @@ CONTAINS
                 !Iterate over components u,v,w,p
                 DO component_idx=1,FIELD_VARIABLE%NUMBER_OF_COMPONENTS
 
-                  CALL BOUNDARY_CONDITIONS_INTEGRATED_CALCULATE(BOUNDARY_CONDITIONS, &
+                  CALL BOUNDARY_CONDITIONS_INTEGRATED_CALCULATE(BOUNDARY_CONDITIONS,DEPENDENT_FIELD, &
                     & RHS_VARIABLE_TYPE,component_idx,ERR,ERROR,*999)
 
                   !Locate calculated value at dof
