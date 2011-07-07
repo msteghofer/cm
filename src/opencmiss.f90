@@ -4038,6 +4038,19 @@ MODULE OPENCMISS
   PUBLIC CMISSSP,CMISSDP,CMISSQP
 
   PUBLIC CMISSSPC,CMISSDPC
+
+!!==================================================================================================================================
+!!
+!! MESH_CONVERSION_ROUTINES
+!!
+!!==================================================================================================================================
+  
+  PUBLIC CMISSCheckInterpolation, CMISSConvertCubicHermiteToQuadraticLagrange
+  
+  TYPE MIDDLE_NODE_TYPE
+    INTEGER(INTG), ALLOCATABLE :: LOCATED_BETWEEN(:)
+    INTEGER(INTG) :: NODE
+  END TYPE MIDDLE_NODE_TYPE
   
 !!==================================================================================================================================
 !!
@@ -34205,6 +34218,462 @@ CONTAINS
     RETURN
     
   END SUBROUTINE CMISSInterfaceEquationsSparsitySetObj
+
+!!==================================================================================================================================
+!!
+!! MESH_CONVERSION_ROUTINES
+!!
+!!==================================================================================================================================
+  
+  SUBROUTINE CMISSCheckInterpolation(Field,VariableType,Err)
+    
+    !Argument variables
+    TYPE(CMISSFieldType), INTENT(IN) :: Field
+    INTEGER(INTG), INTENT(IN) :: VariableType
+    INTEGER(INTG), INTENT(OUT) :: Err
+    !Local variables
+    REAL(DP) :: XI(3)
+    REAL(DP) :: InterpolatedValues(3)
+    INTEGER(INTG) :: i,j,k
+    
+    CALL ENTERS("CMISSCheckInterpolation",Err,ERROR,*999)
+    
+    DO i=0,50
+      DO j=0,50
+        DO k=0,50
+          XI(1)=i/10.0_DP
+          XI(2)=j/10.0_DP
+          XI(3)=k/10.0_DP
+          CALL InterpolateElement(Field,VariableType,XI,1,InterpolatedValues,Err)
+          !PRINT *,"XI=",XI,"VALUES=",InterpolatedValues(1),InterpolatedValues(2),InterpolatedValues(3)
+          PRINT *,"Node:",(i*121+j*11+k)
+          PRINT *,InterpolatedValues(1)
+          PRINT *,InterpolatedValues(2)
+          PRINT *,InterpolatedValues(3)
+        ENDDO
+      ENDDO
+    ENDDO
+    
+    CALL EXITS("CMISSCheckInterpolation")
+    RETURN
+999 CALL ERRORS("CMISSCheckInterpolation",Err,ERROR)
+    CALL EXITS("CMISSCheckInterpolation")
+    CALL CMISS_HANDLE_ERROR(Err,ERROR)
+    RETURN
+    
+  END SUBROUTINE CMISSCheckInterpolation
+  
+  !
+  !================================================================================================================================
+  !
+  
+  SUBROUTINE InterpolateElement(Field,VariableType,XI,ElementNumber,InterpolatedValues,Err)
+    !Argument variables
+    TYPE(CMISSFieldType), INTENT(IN) :: Field
+    INTEGER(INTG), INTENT(IN) :: VariableType
+    REAL(DP), INTENT(IN) :: XI(3)
+    INTEGER(INTG), INTENT(IN) :: ElementNumber
+    REAL(DP), INTENT(OUT) :: InterpolatedValues(3)
+    INTEGER(INTG), INTENT(OUT) :: Err
+    !Local variables
+    TYPE(FIELD_INTERPOLATION_PARAMETERS_TYPE), POINTER :: INTERPOLATION_PARAMETERS
+    TYPE(FIELD_INTERPOLATION_PARAMETERS_PTR_TYPE), POINTER :: INTERPOLATION_PARAMETERS_PTR(:)
+    TYPE(FIELD_INTERPOLATED_POINT_TYPE), POINTER :: INTERPOLATED_POINT
+    
+    CALL ENTERS("InterpolateElement",Err,ERROR,*999)
+    
+    NULLIFY(INTERPOLATED_POINT)
+    NULLIFY(INTERPOLATION_PARAMETERS)
+    NULLIFY(INTERPOLATION_PARAMETERS_PTR)
+    CALL FIELD_INTERPOLATION_PARAMETERS_INITIALISE(Field%FIELD,INTERPOLATION_PARAMETERS_PTR,Err,ERROR,*999)
+    INTERPOLATION_PARAMETERS=>INTERPOLATION_PARAMETERS_PTR(1)%PTR
+    CALL FIELD_INTERPOLATION_PARAMETERS_ELEMENT_GET(FIELD_VALUES_SET_TYPE,ElementNumber,INTERPOLATION_PARAMETERS,Err,ERROR,*999)
+    CALL FIELD_INTERPOLATED_POINT_INITIALISE(INTERPOLATION_PARAMETERS,INTERPOLATED_POINT,Err,ERROR,*999)
+    CALL FIELD_INTERPOLATE_XI(NO_PART_DERIV,XI,INTERPOLATED_POINT,Err,ERROR,*999)
+    InterpolatedValues=INTERPOLATED_POINT%VALUES(:,VariableType)
+    
+    CALL EXITS("InterpolateElement")
+    RETURN
+999 CALL ERRORS("InterpolateElement",Err,ERROR)
+    CALL EXITS("InterpolateElement")
+    CALL CMISS_HANDLE_ERROR(Err,ERROR)
+    RETURN
+  END SUBROUTINE InterpolateElement
+  
+  
+  SUBROUTINE FindMiddleNode(ELEMENT,MIDDLE_NODES,NUMBER_OF_MIDDLE_NODES,FOUND_NODE,Err)
+    !Argument variables
+    INTEGER(INTG), ALLOCATABLE :: ELEMENT(:)
+    TYPE(MIDDLE_NODE_TYPE), ALLOCATABLE :: MIDDLE_NODES(:)
+    INTEGER(INTG), INTENT(IN) :: NUMBER_OF_MIDDLE_NODES
+    INTEGER(INTG), INTENT(OUT) :: FOUND_NODE
+    INTEGER(INTG), INTENT(OUT) :: Err
+    !Local variables
+    INTEGER(INTG) :: i,j,k,node
+    LOGICAL :: allNodesFound
+    
+    CALL ENTERS("FindMiddleNode",Err,ERROR,*999)
+    
+    FOUND_NODE=-1
+    DO i=1,NUMBER_OF_MIDDLE_NODES
+      IF (size(MIDDLE_NODES(i)%LOCATED_BETWEEN,1)==size(ELEMENT)) THEN
+        allNodesFound=.True.
+        DO j=1,size(ELEMENT)
+          IF (ELEMENT(j)/=MIDDLE_NODES(i)%LOCATED_BETWEEN(j)) THEN
+            allNodesFound=.False.
+          ENDIF
+        ENDDO
+        IF (allNodesFound) THEN
+          FOUND_NODE=MIDDLE_NODES(i)%NODE
+        ENDIF
+      ENDIF
+    ENDDO
+    
+    CALL EXITS("FindMiddleNode")
+    RETURN
+999 CALL ERRORS("FindMiddleNode",Err,ERROR)
+    CALL EXITS("FindMiddleNode")
+    CALL CMISS_HANDLE_ERROR(Err,ERROR)
+    RETURN
+  END SUBROUTINE FindMiddleNode
+  
+  
+  SUBROUTINE SortArray(array,err)
+    !Argument variables
+    INTEGER(INTG), ALLOCATABLE :: array(:)
+    INTEGER(INTG), INTENT(OUT) :: Err
+    !Local variables
+    INTEGER(INTG) :: i,j,temp
+    
+    CALL ENTERS("SortArray",Err,ERROR,*999)
+    
+    !PRINT *,"UNSORTED: ",array
+    !simple bubble-sort
+    do i=1,size(array,1)
+      do j=1,size(array,1)-i
+        if (array(j) > array(j+1)) then
+          temp=array(j+1)
+          array(j+1)=array(j)
+          array(j)=temp
+        endif
+      enddo
+    enddo
+    !PRINT *,"SORTED: ",array
+    
+    CALL EXITS("SortArray")
+    RETURN
+999 CALL ERRORS("SortArray",err,ERROR)
+    CALL EXITS("SortArray")
+    CALL CMISS_HANDLE_ERROR(err,ERROR)
+    RETURN
+  END SUBROUTINE SortArray
+  
+  
+  
+  SUBROUTINE CreateMiddleNode(subElement,subElementSize,xi,element,elementNumber,onlyForThisElement,middleNodes, &
+        & numberOfMiddleNodes,nodeCoordinates,numberOfNodes,geometricField,geometricVariableType,Err)
+    !Argument variables
+    INTEGER(INTG), INTENT(IN) :: subElement(8)
+    INTEGER(INTG), INTENT(IN) :: subElementSize
+    REAL(DP), INTENT(IN) :: xi(3)
+    INTEGER(INTG), INTENT(INOUT) :: element(27)
+    INTEGER(INTG), INTENT(IN) :: elementNumber
+    LOGICAL, INTENT(IN) :: onlyForThisElement
+    TYPE(MIDDLE_NODE_TYPE), ALLOCATABLE :: middleNodes(:)
+    INTEGER(INTG), INTENT(INOUT) :: numberOfMiddleNodes
+    REAL(DP), ALLOCATABLE :: nodeCoordinates(:,:)
+    INTEGER(INTG), INTENT(INOUT) :: numberOfNodes
+    TYPE(CMISSFieldType), INTENT(IN) :: geometricField
+    INTEGER(INTG), INTENT(IN) :: geometricVariableType
+    INTEGER(INTG), INTENT(OUT) :: Err
+    !Local variables
+    INTEGER(INTG) :: i,j
+    INTEGER(INTG) :: internalNodeNumber, globalNodeNumber
+    INTEGER(INTG) :: numDifferentNodes,previousNodeNumber
+    INTEGER(INTG), ALLOCATABLE :: subElementAllocatable2(:),subElementAllocatable(:)
+    
+    CALL ENTERS("CreateMiddleNode",Err,ERROR,*999)
+    
+    internalNodeNumber = 1.0+xi(1)*2.0+xi(2)*6.0+xi(3)*18.0
+    allocate(subElementAllocatable2(subElementSize))
+    subElementAllocatable2=subElement(1:subElementSize)
+    CALL SortArray(subElementAllocatable2,Err)
+    
+    !count different nodes to treat special cases
+    numDifferentNodes=0
+    previousNodeNumber=-1
+    do i=1,size(subElementAllocatable2)
+      if (subElementAllocatable2(i)/=previousNodeNumber) then
+        numDifferentNodes=numDifferentNodes+1
+        previousNodeNumber=subElementAllocatable2(i)
+      endif
+    enddo
+    allocate(subElementAllocatable(numDifferentNodes))
+    numDifferentNodes=0
+    previousNodeNumber=-1
+    do i=1,size(subElementAllocatable2)
+      if (subElementAllocatable2(i)/=previousNodeNumber) then
+        numDifferentNodes=numDifferentNodes+1
+        previousNodeNumber=subElementAllocatable2(i)
+        subElementAllocatable(numDifferentNodes)=subElementAllocatable2(i)
+      endif
+    enddo
+        
+    PRINT *,"Searching for node in element",subElementAllocatable
+    CALL FindMiddleNode(subElementAllocatable,middleNodes,numberOfMiddleNodes,globalNodeNumber,Err)
+    IF (globalNodeNumber==-1) THEN
+      IF (numDifferentNodes==1) THEN
+        !No need to create a new node between nodes x and x, just take the node x again, it's always between x and x
+        globalNodeNumber=subElementAllocatable(1)
+        !Register it in database
+        numberOfMiddleNodes = numberOfMiddleNodes + 1
+        middleNodes(numberOfMiddleNodes)%NODE=globalNodeNumber
+        allocate(middleNodes(numberOfMiddleNodes)%LOCATED_BETWEEN(size(subElementAllocatable,1)))
+        middleNodes(numberOfMiddleNodes)%LOCATED_BETWEEN=subElementAllocatable
+        !And return it
+        element(internalNodeNumber)=globalNodeNumber
+      ELSE
+        !Create new node
+        numberOfNodes=numberOfNodes + 1
+        globalNodeNumber=numberOfNodes
+        !Locate it
+        CALL InterpolateElement(geometricField,geometricVariableType,xi,elementNumber, &
+            & nodeCoordinates(globalNodeNumber,:),Err)
+        !Return it to function caller
+        element(internalNodeNumber)=globalNodeNumber
+        !Register it in database
+        numberOfMiddleNodes = numberOfMiddleNodes + 1
+        middleNodes(numberOfMiddleNodes)%NODE=globalNodeNumber
+        allocate(middleNodes(numberOfMiddleNodes)%LOCATED_BETWEEN(size(subElementAllocatable,1)))
+        middleNodes(numberOfMiddleNodes)%LOCATED_BETWEEN=subElementAllocatable
+        PRINT *,"  --- Created node",globalNodeNumber
+      ENDIF
+    ELSE
+      element(internalNodeNumber)=globalNodeNumber
+      PRINT *,"    +++ Found node",globalNodeNumber
+    ENDIF
+    
+    CALL EXITS("CreateMiddleNode")
+    RETURN
+999 CALL ERRORS("CreateMiddleNode",Err,ERROR)
+    CALL EXITS("CreateMiddleNode")
+    CALL CMISS_HANDLE_ERROR(Err,ERROR)
+    RETURN
+  END SUBROUTINE CreateMiddleNode
+
+
+  SUBROUTINE CMISSConvertCubicHermiteToQuadraticLagrange(CHGeometricField,GeometricVariableType,QLGeometricField,WorldRegion, &
+                & QuadraticLagrangeRegion,QuadraticLagrangeRegionUserNumber,CoordinateSystem,QuadraticLagrangeMeshUserNumber, &
+                & QuadraticLagrangeMeshNumberOfComponents,numberOfNodesBefore,numberOfNodes,cubicHermiteElements, &
+                & QuadraticLagrangeMeshComponentNumber,LinearMeshComponentNumber,numberOfDomains,Decomposition, &
+                & DecompositionNumber,Err)
+    
+    !Argument variables
+    TYPE(CMISSFieldType), INTENT(IN) :: CHGeometricField
+    INTEGER(INTG), INTENT(IN) :: GeometricVariableType
+    TYPE(CMISSFieldType), INTENT(OUT) :: QLGeometricField
+    TYPE(CMISSRegionType), INTENT(IN) :: WorldRegion
+    TYPE(CMISSRegionType), INTENT(OUT) :: QuadraticLagrangeRegion
+    INTEGER(INTG), INTENT(IN) :: QuadraticLagrangeRegionUserNumber
+    TYPE(CMISSCoordinateSystemType), INTENT(IN) :: CoordinateSystem
+    INTEGER(INTG), INTENT(IN) :: QuadraticLagrangeMeshUserNumber
+    INTEGER(INTG), INTENT(IN) :: QuadraticLagrangeMeshNumberOfComponents
+    INTEGER(INTG), INTENT(IN) :: numberOfNodesBefore
+    INTEGER(INTG), INTENT(OUT) :: numberOfNodes
+    INTEGER(INTG), ALLOCATABLE :: cubicHermiteElements(:,:)
+    INTEGER(INTG), INTENT(IN) :: QuadraticLagrangeMeshComponentNumber, LinearMeshComponentNumber
+    INTEGER(INTG), INTENT(IN) :: numberOfDomains
+    TYPE(CMISSDecompositionType), INTENT(OUT) :: Decomposition
+    INTEGER(INTG), INTENT(IN) :: DecompositionNumber
+    INTEGER(INTG), INTENT(OUT) :: Err
+    !Local variables
+    INTEGER(INTG) :: i,j,k,D
+    TYPE(MIDDLE_NODE_TYPE), ALLOCATABLE :: middleNodes(:)
+    INTEGER(INTG) :: numberOfMiddleNodes
+    INTEGER(INTG), ALLOCATABLE :: quadraticLagrangeElements(:,:)
+    INTEGER(INTG) :: numberOfElements
+    REAL(DP), ALLOCATABLE :: nodeCoordinates(:,:)
+    TYPE(CMISSMeshType) :: QuadraticLagrangeMesh
+    TYPE(CMISSNodesType) :: Nodes
+    TYPE(CMISSMeshElementsType) :: CMQuadraticLagrangeElements,LinearElements
+    TYPE(CMISSBasisType) :: LinearBasis, QuadraticBasis
+    REAL(DP) :: coord
+    
+    CALL ENTERS("CMISSConvertCubicHermiteToQuadraticLagrange",Err,ERROR,*999)
+    
+    !CALL CMISSMeshNumberOfElementsGet(CubicHermiteMesh,numberOfElements,Err)
+    numberOfElements=size(cubicHermiteElements,2)
+    ALLOCATE(quadraticLagrangeElements(27,numberOfElements))
+    
+    ALLOCATE(middleNodes(numberOfElements*19))
+    numberOfMiddleNodes=0
+    
+    ALLOCATE(nodeCoordinates(numberOfNodesBefore+1:numberOfNodesBefore+numberOfElements*19,3))
+    numberOfNodes=numberOfNodesBefore
+    
+    DO i=1,numberOfElements
+      !The 8 (already existing) corner nodes
+      quadraticLagrangeElements(1,i)=cubicHermiteElements(1,i)
+      quadraticLagrangeElements(3,i)=cubicHermiteElements(2,i)
+      quadraticLagrangeElements(7,i)=cubicHermiteElements(3,i)
+      quadraticLagrangeElements(9,i)=cubicHermiteElements(4,i)
+      quadraticLagrangeElements(19,i)=cubicHermiteElements(5,i)
+      quadraticLagrangeElements(21,i)=cubicHermiteElements(6,i)
+      quadraticLagrangeElements(25,i)=cubicHermiteElements(7,i)
+      quadraticLagrangeElements(27,i)=cubicHermiteElements(8,i)
+      
+      !The 1 node in the middle of the element
+      CALL CreateMiddleNode(cubicHermiteElements((/1,2,3,4,5,6,7,8/),i),8,(/ 0.5_DP, 0.5_DP, 0.5_DP /), &
+            & quadraticLagrangeElements(:,i),i,.True., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      
+      !The 6 nodes in the middle of each of the 6 faces
+      CALL CreateMiddleNode(cubicHermiteElements((/1,2,3,4/),i),4,(/ 0.5_DP, 0.5_DP, 0.0_DP/),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/5,6,7,8/),i),4,(/ 0.5_DP, 0.5_DP, 1.0_DP/),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/1,3,5,7/),i),4,(/ 0.0_DP, 0.5_DP, 0.5_DP/),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/2,4,6,8/),i),4,(/ 1.0_DP, 0.5_DP, 0.5_DP/),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/1,2,5,6/),i),4,(/ 0.5_DP, 0.0_DP, 0.5_DP/),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/3,4,7,8/),i),4,(/ 0.5_DP, 1.0_DP, 0.5_DP/),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      
+      !The 12 nodes in the middle of each of the 12 edges
+      CALL CreateMiddleNode(cubicHermiteElements((/1,2/),i),2,(/ 0.5_DP, 0.0_DP, 0.0_DP /),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/3,4/),i),2,(/ 0.5_DP, 1.0_DP, 0.0_DP /),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/5,6/),i),2,(/ 0.5_DP, 0.0_DP, 1.0_DP /),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/7,8/),i),2,(/ 0.5_DP, 1.0_DP, 1.0_DP /),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/1,3/),i),2,(/ 0.0_DP, 0.5_DP, 0.0_DP /),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/2,4/),i),2,(/ 1.0_DP, 0.5_DP, 0.0_DP /),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/6,8/),i),2,(/ 1.0_DP, 0.5_DP, 1.0_DP /),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/5,7/),i),2,(/ 0.0_DP, 0.5_DP, 1.0_DP /),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/1,5/),i),2,(/ 0.0_DP, 0.0_DP, 0.5_DP /),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/2,6/),i),2,(/ 1.0_DP, 0.0_DP, 0.5_DP /),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/4,8/),i),2,(/ 1.0_DP, 1.0_DP, 0.5_DP /),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+      CALL CreateMiddleNode(cubicHermiteElements((/3,7/),i),2,(/ 0.0_DP, 1.0_DP, 0.5_DP /),quadraticLagrangeElements(:,i),i, &
+            & .False., &
+            & middleNodes,numberOfMiddleNodes,nodeCoordinates,numberOfNodes,CHGeometricField,GeometricVariableType,Err)
+    ENDDO
+    
+    CALL CMISSRegionTypeInitialise(QuadraticLagrangeRegion,Err)
+    CALL CMISSRegionCreateStart(QuadraticLagrangeRegionUserNumber,WorldRegion,QuadraticLagrangeRegion,Err)
+    CALL CMISSRegionCoordinateSystemSet(QuadraticLagrangeRegion,CoordinateSystem,Err)
+    CALL CMISSRegionCreateFinish(QuadraticLagrangeRegion,Err)
+    
+    CALL CMISSMeshTypeInitialise(QuadraticLagrangeMesh,Err)
+    CALL CMISSMeshCreateStart(QuadraticLagrangeMeshUserNumber,QuadraticLagrangeRegion,3,QuadraticLagrangeMesh,Err)
+    CALL CMISSMeshNumberOfComponentsSet(QuadraticLagrangeMesh,QuadraticLagrangeMeshNumberOfComponents,Err)
+    CALL CMISSMeshNumberOfElementsSet(QuadraticLagrangeMesh,numberOfElements,Err)
+    
+    !define nodes for the mesh
+    CALL CMISSNodesTypeInitialise(Nodes,Err)
+    CALL CMISSNodesCreateStart(QuadraticLagrangeRegion,numberOfNodes,Nodes,Err) ! num nodes
+    CALL CMISSNodesCreateFinish(Nodes,Err)
+    
+    CALL CMISSBasisTypeInitialise(QuadraticBasis,Err)
+    CALL CMISSBasisCreateStart(5,QuadraticBasis,Err)
+    CALL CMISSBasisInterpolationXiSet(QuadraticBasis,(/CMISSBasisQuadraticLagrangeInterpolation, &
+      & CMISSBasisQuadraticLagrangeInterpolation,CMISSBasisQuadraticLagrangeInterpolation/),Err)
+    CALL CMISSBasisQuadratureNumberOfGaussXiSet(QuadraticBasis, &
+      & (/CMISSBasisMidQuadratureScheme,CMISSBasisMidQuadratureScheme,CMISSBasisMidQuadratureScheme/),Err)
+    CALL CMISSBasisCreateFinish(QuadraticBasis,Err)
+    
+    CALL CMISSBasisTypeInitialise(LinearBasis,Err)
+    CALL CMISSBasisCreateStart(6,LinearBasis,Err)
+    CALL CMISSBasisCreateFinish(LinearBasis,Err)
+    
+    CALL CMISSMeshElementsTypeInitialise(CMQuadraticLagrangeElements,Err)
+    CALL CMISSMeshElementsCreateStart(QuadraticLagrangeMesh,QuadraticLagrangeMeshComponentNumber,QuadraticBasis, &
+            & CMQuadraticLagrangeElements,Err)
+    DO i=1,numberOfElements
+      CALL CMISSMeshElementsNodesSet(CMQuadraticLagrangeElements,i, quadraticLagrangeElements(:,i),Err)
+    ENDDO
+    CALL CMISSMeshElementsCreateFinish(CMQuadraticLagrangeElements,Err)
+    
+    CALL CMISSMeshElementsTypeInitialise(LinearElements,Err)
+    CALL CMISSMeshElementsCreateStart(QuadraticLagrangeMesh,LinearMeshComponentNumber,LinearBasis,LinearElements,Err)
+    DO i=1,numberOfElements
+      CALL CMISSMeshElementsNodesSet(LinearElements,i, quadraticLagrangeElements( (/1,3,7,9,19,21,25,27/),i),Err)
+    ENDDO
+    CALL CMISSMeshElementsCreateFinish(LinearElements,Err)
+    
+    !finish mesh creation
+    CALL CMISSMeshCreateFinish(QuadraticLagrangeMesh,Err)
+    
+    !Create a decomposition
+    CALL CMISSDecompositionTypeInitialise(Decomposition,Err)
+    CALL CMISSDecompositionCreateStart(DecompositionNumber,QuadraticLagrangeMesh,Decomposition,Err)
+    CALL CMISSDecompositionTypeSet(Decomposition,CMISSDecompositionCalculatedType,Err)
+    CALL CMISSDecompositionNumberOfDomainsSet(Decomposition,numberOfDomains,Err)
+    CALL CMISSDecompositionCreateFinish(Decomposition,Err)
+    
+    !Create a field to put the geometry (default is geometry)
+    CALL CMISSFieldTypeInitialise(QLGeometricField,Err)
+    CALL CMISSFieldCreateStart(1,QuadraticLagrangeRegion,QLGeometricField,Err)
+    CALL CMISSFieldMeshDecompositionSet(QLGeometricField,Decomposition,Err)
+    CALL CMISSFieldTypeSet(QLGeometricField,CMISSFieldGeometricType,Err)  
+    CALL CMISSFieldNumberOfVariablesSet(QLGeometricField,1,Err) ! 1 var
+    CALL CMISSFieldNumberOfComponentsSet(QLGeometricField,CMISSFieldUVariableType,3,Err)   ! 3 components of geom field
+    CALL CMISSFieldComponentMeshComponentSet(QLGeometricField,CMISSFieldUVariableType,1,QuadraticLagrangeMeshComponentNumber,Err)
+    CALL CMISSFieldComponentMeshComponentSet(QLGeometricField,CMISSFieldUVariableType,2,QuadraticLagrangeMeshComponentNumber,Err)
+    CALL CMISSFieldComponentMeshComponentSet(QLGeometricField,CMISSFieldUVariableType,3,QuadraticLagrangeMeshComponentNumber,Err)
+    CALL CMISSFieldCreateFinish(QLGeometricField,Err)
+    
+    DO i=1,numberOfNodesBefore
+      DO D=1,3
+        CALL CMISSFieldParameterSetGetNode(CHGeometricField,CMISSFieldUVariableType,CMISSFieldValuesSetType,1,1, &
+            & i,D,coord,Err)
+        CALL CMISSFieldParameterSetUpdateNode(QLGeometricField,CMISSFieldUVariableType,CMISSFieldValuesSetType,1,1, &
+            & i,D,coord,Err)
+      ENDDO
+    ENDDO
+    DO i=numberOfNodesBefore+1,numberOfNodes
+      DO D=1,3
+        CALL CMISSFieldParameterSetUpdateNode(QLGeometricField,CMISSFieldUVariableType,CMISSFieldValuesSetType,1,1, &
+            & i,D,nodeCoordinates(i,D),Err)
+      ENDDO
+    ENDDO
+    
+    CALL EXITS("CMISSConvertCubicHermiteToQuadraticLagrange")
+    RETURN
+999 CALL ERRORS("CMISSConvertCubicHermiteToQuadraticLagrange",Err,ERROR)
+    CALL EXITS("CMISSConvertCubicHermiteToQuadraticLagrange")
+    CALL CMISS_HANDLE_ERROR(Err,ERROR)
+    RETURN
+    
+  END SUBROUTINE CMISSConvertCubicHermiteToQuadraticLagrange
+  
 
 !!==================================================================================================================================
 !!
