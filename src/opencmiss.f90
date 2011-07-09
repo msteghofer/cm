@@ -66,10 +66,12 @@ MODULE OPENCMISS
   USE EQUATIONS_SET_CONSTANTS
   USE EQUATIONS_SET_ROUTINES
   USE FIELD_ROUTINES
+#ifdef USEFIELDML
   USE FIELDML_TYPES
   USE FIELDML_INPUT_ROUTINES
   USE FIELDML_OUTPUT_ROUTINES
   USE FIELDML_UTIL_ROUTINES
+#endif
   USE FIELD_IO_ROUTINES
   USE FINITE_ELASTICITY_ROUTINES
   USE GENERATED_MESH_ROUTINES
@@ -5721,6 +5723,7 @@ MODULE OPENCMISS
 !!
 !!==================================================================================================================================
 
+#ifdef USEFIELDML
   INTERFACE CMISSFieldmlInput_CreateMeshComponent
     MODULE PROCEDURE CMISSFieldmlInput_CreateMeshComponentObj
     MODULE PROCEDURE CMISSFieldmlInput_CreateMeshComponentNumber
@@ -5756,6 +5759,7 @@ MODULE OPENCMISS
 
   PUBLIC :: CMISSFieldmlOutput_Write, CMISSFieldmlOutput_CreateEnsembleType, CMISSFieldmlOutput_CreateContinuousType, &
     & CMISSFieldmlOutput_AddField, CMISSFieldmlOutput_InitialiseInfo, CMISSFieldmlOutput_AddFieldComponents
+#endif
 
 !!==================================================================================================================================
 !!
@@ -5936,28 +5940,6 @@ CONTAINS
   !================================================================================================================================
   !
 
-  !>Finalises CMISS for C.
-  FUNCTION CMISSFinaliseC() BIND(C,NAME="CMISS_Finalise")
-  
-    !Argument variables
-    !Function variable
-    INTEGER(C_INT) :: CMISSFinaliseC
-    !Local variables
-
-    CALL CMISSFinalise(CMISSFinaliseC)
-
-#ifdef TAUPROF
-    CALL TAU_STATIC_PHASE_STOP('OpenCMISS World Phase')
-#endif
-
-    RETURN
-    
-  END FUNCTION CMISSFinaliseC
-
-  !
-  !================================================================================================================================
-  !
-  
   !>Initialises CMISS returning a user number to the world coordinate system and region.
   SUBROUTINE CMISSInitialiseNumber(WorldCoordinateSystemUserNumber,WorldRegionUserNumber,Err)
   
@@ -46848,6 +46830,7 @@ CONTAINS
   !  
   !================================================================================================================================
   !
+#ifdef USEFIELDML
   SUBROUTINE CMISSFieldmlInput_InitialiseFromFile( fieldmlInfo, filename, err )
     !Arguments
     TYPE(FieldmlInfoType), INTENT(INOUT) :: fieldmlInfo
@@ -47486,7 +47469,8 @@ CONTAINS
     RETURN
     
   END SUBROUTINE CMISSFieldmlUtil_FinaliseInfo
-  
+#endif // USEFIELDML
+
   !
   !================================================================================================================================
   !
