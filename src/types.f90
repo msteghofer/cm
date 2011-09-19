@@ -122,7 +122,24 @@ MODULE TYPES
     REAL(DP), ALLOCATABLE :: LIST_DP(:) !<The double precision data (dimension = 1)for double precision real lists. 
     REAL(DP), ALLOCATABLE :: LIST_DP2(:,:) !<The double precision data (dimension > 1) for double precision real lists. 
   END TYPE LIST_TYPE
-    
+  
+  !
+  !================================================================================================================================
+  !
+  ! Priority Queue types
+  !
+  
+  TYPE PRIORITY_QUEUE_TYPE
+    INTEGER(INTG), ALLOCATABLE :: OBJECT_HEAP(:)
+    REAL(DP), ALLOCATABLE :: VALUE_HEAP(:)
+    INTEGER(INTG) :: HEAP_SIZE
+    INTEGER(INTG), ALLOCATABLE :: OBJECT_TO_HEAP_POSITION_MAP(:)
+  END TYPE PRIORITY_QUEUE_TYPE
+  
+  TYPE PRIORITY_QUEUE_PTR_TYPE
+    TYPE(PRIORITY_QUEUE_TYPE), POINTER :: PTR
+  END TYPE PRIORITY_QUEUE_PTR_TYPE
+  
   !
   !================================================================================================================================
   !
@@ -2463,6 +2480,25 @@ END TYPE GENERATED_MESH_ELLIPSOID_TYPE
     INTEGER(INTG) :: NONLINEAR_SOLVE_TYPE !<The type of nonlinear solver \see SOLVER_ROUTINES_NonlinearSolverTypes,SOLVER_ROUTINES
     TYPE(NEWTON_SOLVER_TYPE), POINTER :: NEWTON_SOLVER !<A pointer to the Newton solver information
   END TYPE NONLINEAR_SOLVER_TYPE
+
+  !>Contains information for a fmm solver
+  TYPE FMM_SOLVER_TYPE
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer to the state solver
+    INTEGER(INTG) :: SOLVER_LIBRARY !<The library type for the fmm solver \see SOLVER_ROUTINES_SolverLibraries,SOLVER_ROUTINES
+    TYPE(PRIORITY_QUEUE_PTR_TYPE), ALLOCATABLE :: PRIORITY_QUEUE(:)
+#ifdef USEPROCPOINTER
+    PROCEDURE(SPEED_FUNCTION_INTERFACE), NOPASS, POINTER :: SPEED_FUNCTION
+#endif
+  END TYPE FMM_SOLVER_TYPE
+
+  !>Contains information for a state solver
+  TYPE STATE_SOLVER_TYPE
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER !<A pointer to the problem_solver
+    INTEGER(INTG) :: STATE_SOLVER_TYPE !<The type of state solver \see SOLVER_ROUTINES_NonlinearSolverTypes,SOLVER_ROUTINES
+    TYPE(FMM_SOLVER_TYPE), POINTER :: FMM_SOLVER !<A pointer to the Newton solver information
+    INTEGER(INTG) :: NUMBER_OF_EQUATIONS_SETS !<The number of equations sets in the state solver
+    TYPE(EQUATIONS_SET_PTR_TYPE), ALLOCATABLE :: EQUATIONS_SETS(:) !<The list of equations sets that are in this state solver
+  END TYPE STATE_SOLVER_TYPE
   
   !>Contains information for an eigenproblem solver
   TYPE EIGENPROBLEM_SOLVER_TYPE
@@ -2511,6 +2547,7 @@ END TYPE GENERATED_MESH_ELLIPSOID_TYPE
     TYPE(DYNAMIC_SOLVER_TYPE), POINTER :: DYNAMIC_SOLVER !<A pointer to the dynamic solver information
     TYPE(DAE_SOLVER_TYPE), POINTER :: DAE_SOLVER !<A pointer to the differential-algebraic equation solver information
     TYPE(EIGENPROBLEM_SOLVER_TYPE), POINTER :: EIGENPROBLEM_SOLVER !<A pointer to the eigenproblem solver information
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer to the state solver information
     TYPE(OPTIMISER_SOLVER_TYPE), POINTER :: OPTIMISER_SOLVER !<A pointer to the optimiser solver information
     TYPE(CELLML_EVALUATOR_SOLVER_TYPE), POINTER :: CELLML_EVALUATOR_SOLVER !<A pointer to the CellML solver information
 
@@ -2987,7 +3024,24 @@ END TYPE GENERATED_MESH_ELLIPSOID_TYPE
   !
   !================================================================================================================================
   !
+  
+#ifdef USEPROCPOINTER
+  PUBLIC SPEED_FUNCTION_INTERFACE
+#endif
 
+  CONTAINS
+  
+#ifdef USEPROCPOINTER
+  SUBROUTINE SPEED_FUNCTION_INTERFACE(EQUATIONS_SET,NODE_A,NODE_B,TIME,ERR,ERROR)
+    !CLASS(SPEED_FUNCTION_TYPE), POINTER :: SPEED_FUNCTION
+    TYPE(EQUATIONS_SET_TYPE), POINTER :: EQUATIONS_SET
+    INTEGER(INTG), INTENT(IN) :: NODE_A
+    INTEGER(INTG), INTENT(IN) :: NODE_B
+    REAL(DP), INTENT(OUT) :: TIME
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+  END SUBROUTINE
+#endif
 
 END MODULE TYPES
 

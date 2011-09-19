@@ -573,10 +573,10 @@ CONTAINS
           ENDDO !interface_condition_idx
 
           !Sanity check.
-          IF(NUMBER_OF_LOCAL_SOLVER_ROWS==0) &
-            & CALL FLAG_ERROR("Invalid problem setup. The number of local solver rows is zero.",ERR,ERROR,*999)
-          IF(NUMBER_OF_GLOBAL_SOLVER_ROWS==0) &
-            & CALL FLAG_ERROR("Invalid problem setup. The number of global solver rows is zero.",ERR,ERROR,*999)
+          !IF(NUMBER_OF_LOCAL_SOLVER_ROWS==0) &
+          !  & CALL FLAG_ERROR("Invalid problem setup. The number of local solver rows is zero.",ERR,ERROR,*999)
+          !IF(NUMBER_OF_GLOBAL_SOLVER_ROWS==0) &
+          !  & CALL FLAG_ERROR("Invalid problem setup. The number of global solver rows is zero.",ERR,ERROR,*999)
 
           !
           ! 3. We now know how many local and global rows are in the solver matrix. Loop over the rows in rank order and calculate
@@ -1606,16 +1606,16 @@ CONTAINS
             ENDDO !solver_variable_idx
 
             !Sanity check
-            IF(NUMBER_OF_LOCAL_SOLVER_DOFS==0) THEN
-              LOCAL_ERROR="Invalid problem setup. The number of local solver DOFs for solver matrix "// &
-                & TRIM(NUMBER_TO_VSTRING(solver_matrix_idx,"*",ERR,ERROR))//" is zero."
-              CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
-            ENDIF
-            IF(NUMBER_OF_GLOBAL_SOLVER_DOFS==0) THEN
-              LOCAL_ERROR="Invalid problem setup. The number of global solver DOFs for solver matrix "// &
-                & TRIM(NUMBER_TO_VSTRING(solver_matrix_idx,"*",ERR,ERROR))//" is zero."
-              CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
-            ENDIF
+            !IF(NUMBER_OF_LOCAL_SOLVER_DOFS==0) THEN
+            !  LOCAL_ERROR="Invalid problem setup. The number of local solver DOFs for solver matrix "// &
+            !    & TRIM(NUMBER_TO_VSTRING(solver_matrix_idx,"*",ERR,ERROR))//" is zero."
+            !  CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+            !ENDIF
+            !IF(NUMBER_OF_GLOBAL_SOLVER_DOFS==0) THEN
+            !  LOCAL_ERROR="Invalid problem setup. The number of global solver DOFs for solver matrix "// &
+            !    & TRIM(NUMBER_TO_VSTRING(solver_matrix_idx,"*",ERR,ERROR))//" is zero."
+            !  CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+            !ENDIF
 
             !
             ! 4c Set up, allocate and initialise column mappings

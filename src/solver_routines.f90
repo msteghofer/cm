@@ -87,7 +87,7 @@ MODULE SOLVER_ROUTINES
   INTEGER(INTG), PARAMETER :: SOLVER_EIGENPROBLEM_TYPE=5 !<A eigenproblem solver \see SOLVER_ROUTINES_SolverTypes,SOLVER_ROUTINES
   INTEGER(INTG), PARAMETER :: SOLVER_OPTIMISER_TYPE=6 !<An optimiser solver \see SOLVER_ROUTINES_SolverTypes,SOLVER_ROUTINES
   INTEGER(INTG), PARAMETER :: SOLVER_CELLML_EVALUATOR_TYPE=7 !<A CellML evaluation solver \see SOLVER_ROUTINES_SolverTypes,SOLVER_ROUTINES
-  INTEGER(INTG), PARAMETER :: SOLVER_STATE_ITERATION_TYPE=8 !<An state iteration solver \see SOLVER_ROUTINES_SolverTypes,SOLVER_ROUTINES
+  INTEGER(INTG), PARAMETER :: SOLVER_STATE_TYPE=8 !<A state iteration solver \see SOLVER_ROUTINES_SolverTypes,SOLVER_ROUTINES
   !>@}
 
   !> \addtogroup SOLVER_ROUTINES_SolverLibraries SOLVER_ROUTINES::SolverLibraries
@@ -281,6 +281,13 @@ MODULE SOLVER_ROUTINES
   INTEGER(INTG), PARAMETER :: SOLVER_SOLUTION_INITIALISE_NO_CHANGE=2 !<Do not change the solution before a solve \see SOLVER_ROUTINES_SolutionInitialiseTypes,SOLVER_ROUTINES
   !>@}
 
+  !> \addtogroup SOLVER_ROUTINES_StateSolverTypes SOLVER_ROUTINES::StateSolverTypes
+  !> \brief The types of state solvers
+  !> \see SOLVER_ROUTINES
+  !>@{
+  INTEGER(INTG), PARAMETER :: SOLVER_STATE_FMM_TYPE=1 !<Fast marching method solver type \see SOLVER_ROUTINES_StateSolverTypes,SOLVER_ROUTINES
+  !>@}
+  
   !> \addtogroup SOLVER_ROUTINES_OutputTypes SOLVER_ROUTINES::OutputTypes
   !> \brief The types of output
   !> \see SOLVER_ROUTINES
@@ -299,8 +306,14 @@ MODULE SOLVER_ROUTINES
   INTEGER(INTG), PARAMETER :: SOLVER_SPARSE_MATRICES=1 !<Use sparse solver matrices \see SOLVER_ROUTINES_SparsityTypes,SOLVER_ROUTINES
   INTEGER(INTG), PARAMETER :: SOLVER_FULL_MATRICES=2 !<Use fully populated solver matrices \see SOLVER_ROUTINES_SparsityTypes,SOLVER_ROUTINES
   !>@}
+  
   !Module types
-
+  
+  TYPE TREE_SET_TYPE
+    INTEGER(INTG) :: VALUE
+    TYPE(TREE_SET_TYPE), POINTER :: LEFT, RIGHT
+  END TYPE TREE_SET_TYPE
+  
   !Module variables
 
   !Interfaces
@@ -349,7 +362,7 @@ MODULE SOLVER_ROUTINES
   PUBLIC SOLVER_NUMBER_OF_SOLVER_TYPES
   
   PUBLIC SOLVER_LINEAR_TYPE,SOLVER_NONLINEAR_TYPE,SOLVER_DYNAMIC_TYPE,SOLVER_DAE_TYPE,SOLVER_EIGENPROBLEM_TYPE, &
-    & SOLVER_OPTIMISER_TYPE,SOLVER_CELLML_EVALUATOR_TYPE
+    & SOLVER_OPTIMISER_TYPE,SOLVER_CELLML_EVALUATOR_TYPE,SOLVER_STATE_TYPE
 
   PUBLIC SOLVER_CMISS_LIBRARY,SOLVER_PETSC_LIBRARY,SOLVER_MUMPS_LIBRARY,SOLVER_SUPERLU_LIBRARY,SOLVER_SPOOLES_LIBRARY, &
     & SOLVER_UMFPACK_LIBRARY,SOLVER_LUSOL_LIBRARY,SOLVER_ESSL_LIBRARY,SOLVER_LAPACK_LIBRARY,SOLVER_TAO_LIBRARY, &
@@ -405,7 +418,7 @@ MODULE SOLVER_ROUTINES
   
   PUBLIC SOLVER_SPARSE_MATRICES,SOLVER_FULL_MATRICES
 
-  PUBLIC SOLVER_EQUATIONS_LINEAR,SOLVER_EQUATIONS_NONLINEAR
+  PUBLIC SOLVER_EQUATIONS_LINEAR,SOLVER_EQUATIONS_NONLINEAR,SOLVER_EQUATIONS_STATEITERATION
 
   PUBLIC SOLVER_EQUATIONS_STATIC,SOLVER_EQUATIONS_QUASISTATIC,SOLVER_EQUATIONS_FIRST_ORDER_DYNAMIC, &
     & SOLVER_EQUATIONS_SECOND_ORDER_DYNAMIC
@@ -554,6 +567,10 @@ MODULE SOLVER_ROUTINES
 
   PUBLIC SOLVER_NEWTON_CELLML_EVALUATOR_CREATE,SOLVER_LINKED_SOLVER_ADD,SOLVER_CELLML_EVALUATOR_FINALISE
 
+  PUBLIC SOLVER_EQUATIONS_SET_ADD
+  
+  PUBLIC SOLVER_FMM_SPEED_FUNCTION_SET
+  
 CONTAINS
 
   !
@@ -1434,6 +1451,14 @@ CONTAINS
           SOLVER%LINKED_SOLVERS(solver_idx)%PTR%SOLVER_FINISHED=.TRUE.
         ENDDO !solver_idx
         SOLVER%SOLVER_FINISHED=.TRUE.
+        !Some solvers don't have any "equations_type" objects, but instead "equations_set_type" objects are added directly
+        !to the solver. So these solvers have to be initialised right here, the next call will already be "solve".
+        SELECT CASE(SOLVER%SOLVE_TYPE)
+        CASE(SOLVER_STATE_TYPE)
+          CALL SOLVER_STATE_CREATE_FINISH(SOLVER%STATE_SOLVER,ERR,ERROR,*999)
+        CASE DEFAULT
+          !Other solvers are initialised after the "equations_type" object has been added
+        END SELECT
       ENDIF
     ELSE
       CALL FLAG_ERROR("Solver is not associated.",ERR,ERROR,*999)
@@ -6018,6 +6043,8 @@ CONTAINS
               CALL SOLVER_MAPPING_SOLVER_MATRICES_NUMBER_SET(SOLVER_MAPPING,0,ERR,ERROR,*999)
             CASE(SOLVER_EIGENPROBLEM_TYPE)
               CALL SOLVER_MAPPING_SOLVER_MATRICES_NUMBER_SET(SOLVER_MAPPING,2,ERR,ERROR,*999)
+            CASE(SOLVER_STATE_TYPE)
+              !CALL SOLVER_MAPPING_SOLVER_MATRICES_NUMBER_SET(SOLVER_MAPPING,0,ERR,ERROR,*999)
             CASE DEFAULT
               LOCAL_ERROR="The solver type of "//TRIM(NUMBER_TO_VSTRING(SOLVER%SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
               CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
@@ -6379,6 +6406,8 @@ CONTAINS
               SOLVER_EQUATIONS%LINEARITY=SOLVER_EQUATIONS_LINEAR
             CASE(SOLVER_EQUATIONS_NONLINEAR)
               SOLVER_EQUATIONS%LINEARITY=SOLVER_EQUATIONS_NONLINEAR
+            CASE(SOLVER_EQUATIONS_STATEITERATION)
+              SOLVER_EQUATIONS%LINEARITY=SOLVER_EQUATIONS_STATEITERATION
             CASE DEFAULT
               LOCAL_ERROR="The specified solver equations linearity type of "// &
                 & TRIM(NUMBER_TO_VSTRING(LINEARITY_TYPE,"*",ERR,ERROR))//" is invalid."
@@ -6641,6 +6670,7 @@ CONTAINS
       CALL SOLVER_DAE_FINALISE(SOLVER%DAE_SOLVER,ERR,ERROR,*999)        
       CALL SOLVER_EIGENPROBLEM_FINALISE(SOLVER%EIGENPROBLEM_SOLVER,ERR,ERROR,*999)
       CALL SOLVER_OPTIMISER_FINALISE(SOLVER%OPTIMISER_SOLVER,ERR,ERROR,*999)
+      CALL SOLVER_STATE_FINALISE(SOLVER%STATE_SOLVER,ERR,ERROR,*999)
       CALL SOLVER_CELLML_EVALUATOR_FINALISE(SOLVER%CELLML_EVALUATOR_SOLVER,ERR,ERROR,*999)
       IF(.NOT.ASSOCIATED(SOLVER%LINKING_SOLVER)) &
         & CALL SOLVER_EQUATIONS_FINALISE(SOLVER%SOLVER_EQUATIONS,ERR,ERROR,*999)
@@ -6797,6 +6827,7 @@ CONTAINS
       NULLIFY(SOLVER%EIGENPROBLEM_SOLVER)
       NULLIFY(SOLVER%OPTIMISER_SOLVER)
       NULLIFY(SOLVER%CELLML_EVALUATOR_SOLVER)
+      NULLIFY(SOLVER%STATE_SOLVER)
       NULLIFY(SOLVER%SOLVER_EQUATIONS)
       NULLIFY(SOLVER%CELLML_EQUATIONS)
     ELSE
@@ -15290,6 +15321,9 @@ CONTAINS
         CASE(SOLVER_CELLML_EVALUATOR_TYPE)
           !Solve a CellML evaluator
           CALL SOLVER_CELLML_EVALUATOR_SOLVE(SOLVER%CELLML_EVALUATOR_SOLVER,ERR,ERROR,*999)
+        CASE(SOLVER_STATE_TYPE)
+          !Solve state problem
+          CALL SOLVER_STATE_SOLVE(SOLVER%STATE_SOLVER,ERR,ERROR,*999)
         CASE DEFAULT
           LOCAL_ERROR="The solver type of "//TRIM(NUMBER_TO_VSTRING(SOLVER%SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
           CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
@@ -15320,6 +15354,1274 @@ CONTAINS
     RETURN 1
    
   END SUBROUTINE SOLVER_SOLVE
+
+
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Finishes the process of creating an state solver 
+  SUBROUTINE SOLVER_STATE_CREATE_FINISH(STATE_SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer to the state solver to finish the creation of.
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+
+    CALL ENTERS("SOLVER_STATE_CREATE_FINISH",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(STATE_SOLVER)) THEN
+      SELECT CASE(STATE_SOLVER%STATE_SOLVER_TYPE)
+      CASE(SOLVER_STATE_FMM_TYPE)
+        CALL SOLVER_FMM_CREATE_FINISH(STATE_SOLVER%FMM_SOLVER,ERR,ERROR,*999)
+      CASE DEFAULT
+        LOCAL_ERROR="The state solver type of "// &
+          & TRIM(NUMBER_TO_VSTRING(STATE_SOLVER%STATE_SOLVER_TYPE,"*",ERR,ERROR))//" is invalid."
+        CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+      END SELECT
+    ELSE
+      CALL FLAG_ERROR("State solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+        
+    CALL EXITS("SOLVER_STATE_CREATE_FINISH")
+    RETURN
+999 CALL ERRORS("SOLVER_STATE_CREATE_FINISH",ERR,ERROR)    
+    CALL EXITS("SOLVER_STATE_CREATE_FINISH")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_STATE_CREATE_FINISH
+        
+  !
+  !================================================================================================================================
+  !
+
+  !>Finishes the process of creating an FMM solver 
+  SUBROUTINE SOLVER_FMM_CREATE_FINISH(FMM_SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(FMM_SOLVER_TYPE), POINTER :: FMM_SOLVER !<A pointer to the FMM solver to finish the creation of.
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    TYPE(DOMAIN_MAPPING_TYPE), POINTER :: NODES_MAPPING
+    TYPE(FIELD_TYPE), POINTER :: DEPENDENT_FIELD
+    INTEGER(INTG) :: i, node, node_idx, max_node_id, num_nodes
+    REAL(DP) :: act_time
+
+    CALL ENTERS("SOLVER_FMM_CREATE_FINISH",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(FMM_SOLVER)) THEN
+      ALLOCATE(FMM_SOLVER%PRIORITY_QUEUE(FMM_SOLVER%STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS))
+      DO i=1,FMM_SOLVER%STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS
+        ! Get dependent field and nodes mapping
+        DEPENDENT_FIELD=>FMM_SOLVER%STATE_SOLVER%EQUATIONS_SETS(i)%PTR%DEPENDENT%DEPENDENT_FIELD
+        NODES_MAPPING=>DEPENDENT_FIELD%DECOMPOSITION%DOMAIN(DEPENDENT_FIELD%DECOMPOSITION% &
+            & MESH_COMPONENT_NUMBER)%PTR%MAPPINGS%NODES
+        
+        ! Find maximum node id of internal nodes
+        max_node_id=1
+        DO node_idx=NODES_MAPPING%INTERNAL_START,NODES_MAPPING%INTERNAL_FINISH
+          node=NODES_MAPPING%DOMAIN_LIST(node_idx)
+          IF (node>max_node_id) THEN
+            max_node_id=node
+          ENDIF
+        ENDDO
+        
+        ! Create priority queue
+        num_nodes=NODES_MAPPING%INTERNAL_FINISH-NODES_MAPPING%INTERNAL_START+1
+        CALL PRIORITY_QUEUE_CREATE_WITH_SIZE(FMM_SOLVER%PRIORITY_QUEUE(i)%PTR,num_nodes,max_node_id,ERR,ERROR,*999)
+        
+        ! Add all activated nodes to priority queue
+        DO node_idx=NODES_MAPPING%INTERNAL_START,NODES_MAPPING%INTERNAL_FINISH
+          node=NODES_MAPPING%DOMAIN_LIST(node_idx)
+          CALL FIELD_PARAMETER_SET_GET_NODE(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+              & FIELD_VALUES_SET_TYPE,1,1,node,1,act_time,ERR,ERROR,*999)
+          IF (act_time < HUGE(act_time)) THEN
+            CALL PRIORITY_QUEUE_ADD(FMM_SOLVER%PRIORITY_QUEUE(i)%PTR,node,act_time,ERR,ERROR,*999)
+          ENDIF
+        ENDDO
+      ENDDO
+    ELSE
+      CALL FLAG_ERROR("State solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+        
+    CALL EXITS("SOLVER_FMM_CREATE_FINISH")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_CREATE_FINISH",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_CREATE_FINISH")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_FMM_CREATE_FINISH
+        
+  !
+  !================================================================================================================================
+  !
+
+  !>Finalise a state solver.
+  SUBROUTINE SOLVER_STATE_FINALISE(STATE_SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer the state solver to finalise
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+
+    CALL ENTERS("SOLVER_STATE_FINALISE",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(STATE_SOLVER)) THEN
+      CALL SOLVER_FMM_FINALISE(STATE_SOLVER%FMM_SOLVER,ERR,ERROR,*999)
+      DEALLOCATE(STATE_SOLVER)
+    ENDIF
+         
+    CALL EXITS("SOLVER_STATE_FINALISE")
+    RETURN
+999 CALL ERRORS("SOLVER_STATE_FINALISE",ERR,ERROR)    
+    CALL EXITS("SOLVER_STATE_FINALISE")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_STATE_FINALISE
+  !
+  !================================================================================================================================
+  !
+
+  !>Initialise a FMM solver for a state solver
+  SUBROUTINE SOLVER_FMM_INITIALISE(STATE_SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer the solver to initialise the FMM solver for
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    INTEGER(INTG) :: DUMMY_ERR
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER
+    TYPE(VARYING_STRING) :: DUMMY_ERROR
+ 
+    CALL ENTERS("SOLVER_FMM_INITIALISE",ERR,ERROR,*998)
+
+    IF(ASSOCIATED(STATE_SOLVER)) THEN
+      IF(ASSOCIATED(STATE_SOLVER%FMM_SOLVER)) THEN
+        CALL FLAG_ERROR("FMM solver is already associated for this state solver.",ERR,ERROR,*998)
+      ELSE        
+        SOLVER=>STATE_SOLVER%SOLVER
+        IF(ASSOCIATED(SOLVER)) THEN
+          !Allocate and initialise a FMM solver
+          ALLOCATE(STATE_SOLVER%FMM_SOLVER,STAT=ERR)
+          IF(ERR/=0) CALL FLAG_ERROR("Could not allocate state solver FMM solver.",ERR,ERROR,*999)
+          STATE_SOLVER%FMM_SOLVER%STATE_SOLVER=>STATE_SOLVER
+          STATE_SOLVER%FMM_SOLVER%SOLVER_LIBRARY=SOLVER_CMISS_LIBRARY
+#ifdef USEPROCPOINTER
+          NULLIFY(STATE_SOLVER%FMM_SOLVER%SPEED_FUNCTION)
+          STATE_SOLVER%FMM_SOLVER%SPEED_FUNCTION => SOLVER_FMM_SPEED_FUNCTION_ONE
+#else
+          CALL FLAG_ERROR("Procedure pointers are not supported by your compiler.",ERR,ERROR,*999)
+#endif
+        ELSE
+          CALL FLAG_ERROR("State solver solver is not associated.",ERR,ERROR,*998)
+        ENDIF
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("State solver is not associated.",ERR,ERROR,*998)
+    ENDIF
+        
+    CALL EXITS("SOLVER_FMM_INITIALISE")
+    RETURN
+999 CALL SOLVER_FMM_FINALISE(STATE_SOLVER%FMM_SOLVER,DUMMY_ERR,DUMMY_ERROR,*998)
+998 CALL ERRORS("SOLVER_FMM_INITIALISE",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_INITIALISE")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_FMM_INITIALISE
+  !
+  !================================================================================================================================
+  !
+
+  !>Finalise a Newton solver and deallocate all memory
+  SUBROUTINE SOLVER_FMM_FINALISE(FMM_SOLVER,ERR,ERROR,*)
+    
+    !Argument variables
+    TYPE(FMM_SOLVER_TYPE), POINTER :: FMM_SOLVER !<A pointer the Newton solver to finalise
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    INTEGER(INTG) :: i
+    
+    CALL ENTERS("SOLVER_FMM_FINALISE",ERR,ERROR,*999)
+    
+    IF(ASSOCIATED(FMM_SOLVER)) THEN
+      DO i=1,FMM_SOLVER%STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS
+        CALL PRIORITY_QUEUE_DESTROY(FMM_SOLVER%PRIORITY_QUEUE(i)%PTR,ERR,ERROR,*999)
+      ENDDO
+      DEALLOCATE(FMM_SOLVER%PRIORITY_QUEUE)
+      DEALLOCATE(FMM_SOLVER)
+    ENDIF
+    
+    CALL EXITS("SOLVER_FMM_FINALISE")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_FINALISE",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_FINALISE")
+    RETURN 1
+    
+  END SUBROUTINE SOLVER_FMM_FINALISE
+
+  !
+  !================================================================================================================================
+  !
+  
+  !>Sets/changes the speed function for a fmm solver.
+  SUBROUTINE SOLVER_FMM_SPEED_FUNCTION_SET(SOLVER,SPEED_FUNCTION,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER !<A pointer to the fmm solver to set the theta value for
+    PROCEDURE(SPEED_FUNCTION_INTERFACE), POINTER :: SPEED_FUNCTION
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER
+    TYPE(FMM_SOLVER_TYPE), POINTER :: FMM_SOLVER
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    
+    CALL ENTERS("SOLVER_FMM_SPEED_FUNCTION_SET",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(SOLVER)) THEN
+      IF(SOLVER%SOLVER_FINISHED) THEN
+        CALL FLAG_ERROR("The solver has already been finished.",ERR,ERROR,*999)
+      ELSE
+        IF(SOLVER%SOLVE_TYPE==SOLVER_STATE_TYPE) THEN
+          STATE_SOLVER=>SOLVER%STATE_SOLVER
+          IF(ASSOCIATED(STATE_SOLVER)) THEN
+            IF(STATE_SOLVER%STATE_SOLVER_TYPE==SOLVER_STATE_FMM_TYPE) THEN
+              FMM_SOLVER=>STATE_SOLVER%FMM_SOLVER
+              IF(ASSOCIATED(FMM_SOLVER)) THEN
+                IF(ASSOCIATED(SPEED_FUNCTION)) THEN
+                  FMM_SOLVER%SPEED_FUNCTION=>SPEED_FUNCTION
+                ELSE
+                  LOCAL_ERROR="The speed function pointer you want to use in the fmm solver is not associated."
+                  CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+                ENDIF
+              ELSE
+                CALL FLAG_ERROR("FMM solver is not associated.",ERR,ERROR,*999)
+              ENDIF
+            ELSE
+              CALL FLAG_ERROR("The specified solver is not a fmm solver.",ERR,ERROR,*999)
+            ENDIF
+          ELSE
+            CALL FLAG_ERROR("State solver is not associated.",ERR,ERROR,*999)
+          ENDIF
+        ELSE
+          CALL FLAG_ERROR("The specified solver is not a state solver.",ERR,ERROR,*999)
+        ENDIF
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("Solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+    
+    CALL EXITS("SOLVER_FMM_SPEED_FUNCTION_SET")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_SPEED_FUNCTION_SET",ERR,ERROR)
+    CALL EXITS("SOLVER_FMM_SPEED_FUNCTION_SET")
+    RETURN 1
+  END SUBROUTINE SOLVER_FMM_SPEED_FUNCTION_SET
+  
+  !
+  !================================================================================================================================
+  !
+  
+  !>Initialise an state solver for a solver.
+  SUBROUTINE SOLVER_STATE_INITIALISE(SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER !<A pointer the solver to initialise the state solver for
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    INTEGER(INTG) :: DUMMY_ERR
+    TYPE(VARYING_STRING) :: DUMMY_ERROR
+
+    CALL ENTERS("SOLVER_STATE_INITIALISE",ERR,ERROR,*998)
+    
+    IF(ASSOCIATED(SOLVER)) THEN
+      IF(ASSOCIATED(SOLVER%STATE_SOLVER)) THEN
+        CALL FLAG_ERROR("State solver is already associated for this solver.",ERR,ERROR,*998)
+      ELSE
+        ALLOCATE(SOLVER%STATE_SOLVER,STAT=ERR)
+        IF(ERR/=0) CALL FLAG_ERROR("Could not allocate solver state solver.",ERR,ERROR,*999)
+        SOLVER%STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS=0
+        NULLIFY(SOLVER%STATE_SOLVER%FMM_SOLVER)
+        SOLVER%STATE_SOLVER%SOLVER=>SOLVER
+        !default to FMM solver
+        SOLVER%STATE_SOLVER%STATE_SOLVER_TYPE=SOLVER_STATE_FMM_TYPE
+        CALL SOLVER_FMM_INITIALISE(SOLVER%STATE_SOLVER,ERR,ERROR,*999)
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("Solver is not associated.",ERR,ERROR,*998)
+    ENDIF
+        
+    CALL EXITS("SOLVER_STATE_INITIALISE")
+    RETURN
+999 CALL SOLVER_STATE_FINALISE(SOLVER%STATE_SOLVER,DUMMY_ERR,DUMMY_ERROR,*998)
+998 CALL ERRORS("SOLVER_STATE_INITIALISE",ERR,ERROR)    
+    CALL EXITS("SOLVER_STATE_INITIALISE")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_STATE_INITIALISE
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Returns the type of library to use for a FMM solver.
+  SUBROUTINE SOLVER_FMM_LIBRARY_TYPE_GET(FMM_SOLVER,SOLVER_LIBRARY_TYPE,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(FMM_SOLVER_TYPE), POINTER :: FMM_SOLVER !<A pointer the state solver to get the library type for.
+    INTEGER(INTG), INTENT(OUT) :: SOLVER_LIBRARY_TYPE !<On exit, the type of library used for the FMM solver \see SOLVER_ROUTINES_SolverLibraries,SOLVER_ROUTINES
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+ 
+    CALL ENTERS("SOLVER_FMM_LIBRARY_TYPE_GET",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(FMM_SOLVER)) THEN
+      SOLVER_LIBRARY_TYPE=FMM_SOLVER%SOLVER_LIBRARY
+    ELSE
+      CALL FLAG_ERROR("FMM solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+    
+    CALL EXITS("SOLVER_FMM_LIBRARY_TYPE_GET")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_LIBRARY_TYPE_GET",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_LIBRARY_TYPE_GET")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_FMM_LIBRARY_TYPE_GET
+  
+  !
+  !================================================================================================================================
+  !
+
+  !>Returns the type of library to use for an state solver.
+  SUBROUTINE SOLVER_STATE_LIBRARY_TYPE_GET(STATE_SOLVER,SOLVER_LIBRARY_TYPE,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer the state solver to get the library type for.
+    INTEGER(INTG), INTENT(OUT) :: SOLVER_LIBRARY_TYPE !<On exit, the type of library used for the state solver \see SOLVER_ROUTINES_SolverLibraries,SOLVER_ROUTINES
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+ 
+    CALL ENTERS("SOLVER_STATE_LIBRARY_TYPE_GET",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(STATE_SOLVER)) THEN
+      SELECT CASE(STATE_SOLVER%STATE_SOLVER_TYPE)
+      CASE(SOLVER_STATE_FMM_TYPE)
+        CALL SOLVER_FMM_LIBRARY_TYPE_GET(STATE_SOLVER%FMM_SOLVER,SOLVER_LIBRARY_TYPE,ERR,ERROR,*999)
+      CASE DEFAULT
+        LOCAL_ERROR="The state solver type of "// &
+          & TRIM(NUMBER_TO_VSTRING(STATE_SOLVER%STATE_SOLVER_TYPE,"*",ERR,ERROR))//" is invalid."
+        CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+      END SELECT
+    ELSE
+      CALL FLAG_ERROR("State solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+    
+    CALL EXITS("SOLVER_STATE_LIBRARY_TYPE_GET")
+    RETURN
+999 CALL ERRORS("SOLVER_STATE_LIBRARY_TYPE_GET",ERR,ERROR)    
+    CALL EXITS("SOLVER_STATE_LIBRARY_TYPE_GET")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_STATE_LIBRARY_TYPE_GET
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Sets/changes the type of library to use for a state solver.
+  SUBROUTINE SOLVER_STATE_LIBRARY_TYPE_SET(STATE_SOLVER,SOLVER_LIBRARY_TYPE,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer the state solver to get the library type for.
+    INTEGER(INTG), INTENT(IN) :: SOLVER_LIBRARY_TYPE !<The type of library for the state solver to set. \see SOLVER_ROUTINES_SolverLibraries,SOLVER_ROUTINES
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+
+    CALL ENTERS("SOLVER_STATE_LIBRARY_TYPE_SET",ERR,ERROR,*999)
+    
+    IF(ASSOCIATED(STATE_SOLVER)) THEN
+      SELECT CASE(STATE_SOLVER%STATE_SOLVER_TYPE)
+      CASE(SOLVER_STATE_FMM_TYPE)
+        CALL SOLVER_FMM_LIBRARY_TYPE_SET(STATE_SOLVER%FMM_SOLVER,SOLVER_LIBRARY_TYPE,ERR,ERROR,*999)
+      CASE DEFAULT
+        LOCAL_ERROR="The state solver type of "// &
+          & TRIM(NUMBER_TO_VSTRING(STATE_SOLVER%STATE_SOLVER_TYPE,"*",ERR,ERROR))//" is invalid."
+        CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+      END SELECT
+
+    ELSE
+      CALL FLAG_ERROR("State solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+        
+    CALL EXITS("SOLVER_STATE_LIBRARY_TYPE_SET")
+    RETURN
+999 CALL ERRORS("SOLVER_STATE_LIBRARY_TYPE_SET",ERR,ERROR)    
+    CALL EXITS("SOLVER_STATE_LIBRARY_TYPE_SET")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_STATE_LIBRARY_TYPE_SET
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Sets/changes the type of library to use for a FMM solver.
+  SUBROUTINE SOLVER_FMM_LIBRARY_TYPE_SET(FMM_SOLVER,SOLVER_LIBRARY_TYPE,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(FMM_SOLVER_TYPE), POINTER :: FMM_SOLVER !<A pointer the FMM solver to get the library type for.
+    INTEGER(INTG), INTENT(IN) :: SOLVER_LIBRARY_TYPE !<The type of library for the FMM solver to set. \see SOLVER_ROUTINES_SolverLibraries,SOLVER_ROUTINES
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+
+    CALL ENTERS("SOLVER_FMM_LIBRARY_TYPE_SET",ERR,ERROR,*999)
+    
+    IF(ASSOCIATED(FMM_SOLVER)) THEN
+      SELECT CASE(SOLVER_LIBRARY_TYPE)
+      CASE(SOLVER_CMISS_LIBRARY)
+        FMM_SOLVER%SOLVER_LIBRARY=SOLVER_CMISS_LIBRARY
+      CASE DEFAULT
+        LOCAL_ERROR="The specified solver library type of "//TRIM(NUMBER_TO_VSTRING(SOLVER_LIBRARY_TYPE,"*",ERR,ERROR))// &
+          & " is invalid for a FMM solver."
+        CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+      END SELECT
+    ELSE
+      CALL FLAG_ERROR("FMM solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+        
+    CALL EXITS("SOLVER_FMM_LIBRARY_TYPE_SET")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_LIBRARY_TYPE_SET",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_LIBRARY_TYPE_SET")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_FMM_LIBRARY_TYPE_SET
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Solve an state solver
+  SUBROUTINE SOLVER_STATE_SOLVE(STATE_SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER !<A pointer the state solver to solve
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+
+    CALL ENTERS("SOLVER_STATE_SOLVE",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(STATE_SOLVER)) THEN        
+      SELECT CASE(STATE_SOLVER%STATE_SOLVER_TYPE)
+      CASE(SOLVER_STATE_FMM_TYPE)
+        CALL SOLVER_FMM_SOLVE(STATE_SOLVER%FMM_SOLVER,ERR,ERROR,*999)
+      CASE DEFAULT
+        LOCAL_ERROR="The state solver type of "// &
+          & TRIM(NUMBER_TO_VSTRING(STATE_SOLVER%STATE_SOLVER_TYPE,"*",ERR,ERROR))//" is invalid."
+        CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+      END SELECT
+
+    ELSE
+      CALL FLAG_ERROR("state solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+         
+    CALL EXITS("SOLVER_STATE_SOLVE")
+    RETURN
+999 CALL ERRORS("SOLVER_STATE_SOLVE",ERR,ERROR)    
+    CALL EXITS("SOLVER_STATE_SOLVE")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_STATE_SOLVE
+
+  !
+  !================================================================================================================================
+  !
+  
+  SUBROUTINE PRIORITY_QUEUE_CREATE(PRIORITY_QUEUE,NUM_OBJECTS,ERR,ERROR,*)
+    !Argument variables
+    TYPE(PRIORITY_QUEUE_TYPE), POINTER, INTENT(OUT) :: PRIORITY_QUEUE
+    INTEGER(INTG), INTENT(IN) :: NUM_OBJECTS
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    
+    CALL ENTERS("PRIORITY_QUEUE_CREATE",ERR,ERROR,*999)
+    
+    CALL PRIORITY_QUEUE_CREATE_WITH_SIZE(PRIORITY_QUEUE,4,NUM_OBJECTS,ERR,ERROR,*999)
+    
+    CALL EXITS("PRIORITY_QUEUE_CREATE")
+    RETURN
+999 CALL ERRORS("PRIORITY_QUEUE_CREATE",ERR,ERROR)    
+    CALL EXITS("PRIORITY_QUEUE_CREATE")
+    RETURN 1
+   
+  END SUBROUTINE PRIORITY_QUEUE_CREATE
+  
+  !
+  !================================================================================================================================
+  !
+  
+  SUBROUTINE PRIORITY_QUEUE_CREATE_WITH_SIZE(PRIORITY_QUEUE,INITIAL_BUFFER_SIZE,NUM_OBJECTS,ERR,ERROR,*)
+    !Argument variables
+    TYPE(PRIORITY_QUEUE_TYPE), POINTER, INTENT(OUT) :: PRIORITY_QUEUE
+    INTEGER(INTG), INTENT(IN) :: INITIAL_BUFFER_SIZE
+    INTEGER(INTG), INTENT(IN) :: NUM_OBJECTS
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    INTEGER(INTG) :: i
+    
+    CALL ENTERS("PRIORITY_QUEUE_CREATE_WITH_SIZE",ERR,ERROR,*999)
+    
+    ALLOCATE(PRIORITY_QUEUE)
+    ALLOCATE(PRIORITY_QUEUE%OBJECT_HEAP(INITIAL_BUFFER_SIZE))
+    ALLOCATE(PRIORITY_QUEUE%VALUE_HEAP(INITIAL_BUFFER_SIZE))
+    PRIORITY_QUEUE%HEAP_SIZE=0
+    ALLOCATE(PRIORITY_QUEUE%OBJECT_TO_HEAP_POSITION_MAP(NUM_OBJECTS))
+    PRIORITY_QUEUE%OBJECT_TO_HEAP_POSITION_MAP=(/(0,i=1,NUM_OBJECTS)/)
+    
+    CALL EXITS("PRIORITY_QUEUE_CREATE_WITH_SIZE")
+    RETURN
+999 CALL ERRORS("PRIORITY_QUEUE_CREATE_WITH_SIZE",ERR,ERROR)    
+    CALL EXITS("PRIORITY_QUEUE_CREATE_WITH_SIZE")
+    RETURN 1
+   
+  END SUBROUTINE PRIORITY_QUEUE_CREATE_WITH_SIZE
+  
+  !
+  !================================================================================================================================
+  !
+  
+  SUBROUTINE PRIORITY_QUEUE_DESTROY(PRIORITY_QUEUE,ERR,ERROR,*)
+    !Argument variables
+    TYPE(PRIORITY_QUEUE_TYPE), POINTER, INTENT(INOUT) :: PRIORITY_QUEUE
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    INTEGER(INTG) :: i
+    
+    CALL ENTERS("PRIORITY_QUEUE_DESTROY",ERR,ERROR,*999)
+    
+    DEALLOCATE(PRIORITY_QUEUE%OBJECT_HEAP)
+    DEALLOCATE(PRIORITY_QUEUE%VALUE_HEAP)
+    DEALLOCATE(PRIORITY_QUEUE%OBJECT_TO_HEAP_POSITION_MAP)
+    DEALLOCATE(PRIORITY_QUEUE)
+    NULLIFY(PRIORITY_QUEUE)
+    
+    CALL EXITS("PRIORITY_QUEUE_DESTROY")
+    RETURN
+999 CALL ERRORS("PRIORITY_QUEUE_DESTROY",ERR,ERROR)    
+    CALL EXITS("PRIORITY_QUEUE_DESTROY")
+    RETURN 1
+   
+  END SUBROUTINE PRIORITY_QUEUE_DESTROY
+  
+  !
+  !================================================================================================================================
+  !
+  
+  SUBROUTINE PRIORITY_QUEUE_ADD(PRIORITY_QUEUE,OBJECT,VALUE,ERR,ERROR,*)
+    !Argument variables
+    TYPE(PRIORITY_QUEUE_TYPE), POINTER, INTENT(IN) :: PRIORITY_QUEUE
+    INTEGER(INTG), INTENT(IN) :: OBJECT
+    REAL(DP), INTENT(IN) :: VALUE
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    INTEGER(INTG) :: i
+    REAL(DP), ALLOCATABLE :: OLD_VALUE_HEAP(:)
+    INTEGER(INTG), ALLOCATABLE :: OLD_OBJECT_HEAP(:)
+    
+    CALL ENTERS("PRIORITY_QUEUE_ADD",ERR,ERROR,*999)
+    
+    ! Resize heaps, if necessary
+    IF (SIZE(PRIORITY_QUEUE%VALUE_HEAP,1) < PRIORITY_QUEUE%HEAP_SIZE+1) THEN
+      CALL MOVE_ALLOC(PRIORITY_QUEUE%VALUE_HEAP,OLD_VALUE_HEAP)
+      ALLOCATE(PRIORITY_QUEUE%VALUE_HEAP(SIZE(OLD_VALUE_HEAP,1)*2))
+      PRIORITY_QUEUE%VALUE_HEAP(1:SIZE(OLD_VALUE_HEAP,1))=OLD_VALUE_HEAP
+      DEALLOCATE(OLD_VALUE_HEAP)
+    ENDIF
+    IF (SIZE(PRIORITY_QUEUE%OBJECT_HEAP,1) < PRIORITY_QUEUE%HEAP_SIZE+1) THEN
+      CALL MOVE_ALLOC(PRIORITY_QUEUE%OBJECT_HEAP,OLD_OBJECT_HEAP)
+      ALLOCATE(PRIORITY_QUEUE%OBJECT_HEAP(SIZE(OLD_OBJECT_HEAP,1)*2))
+      PRIORITY_QUEUE%OBJECT_HEAP(1:SIZE(OLD_OBJECT_HEAP,1))=OLD_OBJECT_HEAP
+      DEALLOCATE(OLD_OBJECT_HEAP)
+    ENDIF
+    
+    ! Add the object as last leaf
+    PRIORITY_QUEUE%VALUE_HEAP(PRIORITY_QUEUE%HEAP_SIZE+1)=VALUE
+    PRIORITY_QUEUE%OBJECT_HEAP(PRIORITY_QUEUE%HEAP_SIZE+1)=OBJECT
+    PRIORITY_QUEUE%OBJECT_TO_HEAP_POSITION_MAP(OBJECT)=PRIORITY_QUEUE%HEAP_SIZE+1
+    PRIORITY_QUEUE%HEAP_SIZE=PRIORITY_QUEUE%HEAP_SIZE+1
+    
+    ! Sift the last leaf (=new object) down to where it belongs
+    CALL PRIORITY_QUEUE_SIFT_DOWN(PRIORITY_QUEUE,PRIORITY_QUEUE%HEAP_SIZE,ERR,ERROR,*999)
+    
+    CALL EXITS("PRIORITY_QUEUE_ADD")
+    RETURN
+999 CALL ERRORS("PRIORITY_QUEUE_ADD",ERR,ERROR)    
+    CALL EXITS("PRIORITY_QUEUE_ADD")
+    RETURN 1
+   
+  END SUBROUTINE PRIORITY_QUEUE_ADD
+  
+  !
+  !================================================================================================================================
+  !
+  
+  SUBROUTINE PRIORITY_QUEUE_FIRST(PRIORITY_QUEUE,OBJECT,VALUE,ERR,ERROR,*)
+    !Argument variables
+    TYPE(PRIORITY_QUEUE_TYPE), POINTER :: PRIORITY_QUEUE
+    INTEGER(INTG), INTENT(OUT) :: OBJECT
+    REAL(DP), INTENT(OUT) :: VALUE
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    
+    CALL ENTERS("PRIORITY_QUEUE_FIRST",ERR,ERROR,*999)
+    
+    IF (PRIORITY_QUEUE%HEAP_SIZE <= 0) THEN
+      CALL FLAG_ERROR("Priority queue is empty.",ERR,ERROR,*999)
+    ENDIF
+    OBJECT=PRIORITY_QUEUE%OBJECT_HEAP(1)
+    VALUE=PRIORITY_QUEUE%VALUE_HEAP(1)
+    
+    CALL EXITS("PRIORITY_QUEUE_FIRST")
+    RETURN
+999 CALL ERRORS("PRIORITY_QUEUE_FIRST",ERR,ERROR)    
+    CALL EXITS("PRIORITY_QUEUE_FIRST")
+    RETURN 1
+   
+  END SUBROUTINE PRIORITY_QUEUE_FIRST
+  
+  !
+  !================================================================================================================================
+  !
+
+  SUBROUTINE PRIORITY_QUEUE_POP(PRIORITY_QUEUE,OBJECT,VALUE,ERR,ERROR,*)
+    !Argument variables
+    TYPE(PRIORITY_QUEUE_TYPE), POINTER :: PRIORITY_QUEUE
+    INTEGER(INTG), INTENT(OUT) :: OBJECT
+    REAL(DP), INTENT(OUT) :: VALUE
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    INTEGER(INTG) :: pq_lower_child, pq_cur_position
+    
+    CALL ENTERS("PRIORITY_QUEUE_POP",ERR,ERROR,*999)
+    
+    IF (PRIORITY_QUEUE%HEAP_SIZE <= 0) THEN
+      CALL FLAG_ERROR("Priority queue is empty.",ERR,ERROR,*999)
+    ENDIF
+    
+    ! return first element
+    CALL PRIORITY_QUEUE_FIRST(PRIORITY_QUEUE,OBJECT,VALUE,ERR,ERROR,*999)
+    
+    ! delete first element
+    pq_cur_position=1
+    PRIORITY_QUEUE%OBJECT_TO_HEAP_POSITION_MAP(PRIORITY_QUEUE%OBJECT_HEAP(pq_cur_position))=0
+    
+    ! move the hole from the top of the heap to a leaf
+    DO WHILE(pq_cur_position*2<=PRIORITY_QUEUE%HEAP_SIZE)
+      ! check, which of the children is the lower one
+      IF (pq_cur_position*2+1<=PRIORITY_QUEUE%HEAP_SIZE .AND. &
+          & PRIORITY_QUEUE%VALUE_HEAP(pq_cur_position*2+1)<PRIORITY_QUEUE%VALUE_HEAP(pq_cur_position*2)) THEN
+        pq_lower_child=pq_cur_position*2+1
+      ELSE
+        pq_lower_child=pq_cur_position*2
+      ENDIF
+      
+      ! move pq_lower_child up to pq_cur_position: update arrays at pq_cur_position and position map
+      PRIORITY_QUEUE%VALUE_HEAP(pq_cur_position)=PRIORITY_QUEUE%VALUE_HEAP(pq_lower_child)
+      PRIORITY_QUEUE%OBJECT_HEAP(pq_cur_position)=PRIORITY_QUEUE%OBJECT_HEAP(pq_lower_child)
+      PRIORITY_QUEUE%OBJECT_TO_HEAP_POSITION_MAP(PRIORITY_QUEUE%OBJECT_HEAP(pq_cur_position))=pq_cur_position
+      
+      pq_cur_position=pq_lower_child
+    ENDDO
+    
+    IF (pq_cur_position < PRIORITY_QUEUE%HEAP_SIZE) THEN
+      ! fill the hole at the leaf with the last leaf
+      PRIORITY_QUEUE%VALUE_HEAP(pq_cur_position)=PRIORITY_QUEUE%VALUE_HEAP(PRIORITY_QUEUE%HEAP_SIZE)
+      PRIORITY_QUEUE%OBJECT_HEAP(pq_cur_position)=PRIORITY_QUEUE%OBJECT_HEAP(PRIORITY_QUEUE%HEAP_SIZE)
+      PRIORITY_QUEUE%OBJECT_TO_HEAP_POSITION_MAP(PRIORITY_QUEUE%OBJECT_HEAP(pq_cur_position))=pq_cur_position
+      
+      ! sift down the element that just has changed position
+      CALL PRIORITY_QUEUE_SIFT_DOWN(PRIORITY_QUEUE,pq_cur_position,ERR,ERROR,*999)
+    ENDIF
+    
+    ! mark the last leaf as deleted
+    PRIORITY_QUEUE%HEAP_SIZE=PRIORITY_QUEUE%HEAP_SIZE-1
+    
+    CALL EXITS("PRIORITY_QUEUE_POP")
+    RETURN
+999 CALL ERRORS("PRIORITY_QUEUE_POP",ERR,ERROR)    
+    CALL EXITS("PRIORITY_QUEUE_POP")
+    RETURN 1
+   
+  END SUBROUTINE PRIORITY_QUEUE_POP
+  
+  !
+  !================================================================================================================================
+  !
+  
+!  // In Java waere es so schoen kurz... und viel lesbarer...
+!  void UpdateObjectValue(int object, double value) {
+!      int pq_cur_position=this.m_objectToHeapPositionMap[object];
+!      this.m_valueHeap(pq_cur_position)=value;
+!      this.siftDown(pq_cur_position);
+!  }
+  
+  SUBROUTINE PRIORITY_QUEUE_UPDATE_OBJECT_VALUE(PRIORITY_QUEUE,OBJECT,VALUE,ERR,ERROR,*)
+    !Argument variables
+    TYPE(PRIORITY_QUEUE_TYPE), POINTER :: PRIORITY_QUEUE
+    INTEGER(INTG), INTENT(IN) :: OBJECT
+    REAL(DP), INTENT(IN) :: VALUE
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    INTEGER(INTG) :: pq_cur_position
+    
+    CALL ENTERS("PRIORITY_QUEUE_UPDATE_OBJECT_VALUE",ERR,ERROR,*999)
+    
+    ! update value in priority queue
+    pq_cur_position=PRIORITY_QUEUE%OBJECT_TO_HEAP_POSITION_MAP(OBJECT)
+    IF (pq_cur_position > 0) THEN
+      PRIORITY_QUEUE%VALUE_HEAP(pq_cur_position)=VALUE
+      
+      ! sift down
+      CALL PRIORITY_QUEUE_SIFT_DOWN(PRIORITY_QUEUE,pq_cur_position,ERR,ERROR,*999)
+    ELSE
+      CALL PRIORITY_QUEUE_ADD(PRIORITY_QUEUE,OBJECT,VALUE,ERR,ERROR,*999)
+    ENDIF
+    
+    CALL EXITS("PRIORITY_QUEUE_UPDATE_OBJECT_VALUE")
+    RETURN
+999 CALL ERRORS("PRIORITY_QUEUE_UPDATE_OBJECT_VALUE",ERR,ERROR)    
+    CALL EXITS("PRIORITY_QUEUE_UPDATE_OBJECT_VALUE")
+    RETURN 1
+   
+  END SUBROUTINE PRIORITY_QUEUE_UPDATE_OBJECT_VALUE
+  
+  !
+  !================================================================================================================================
+  !
+  
+  SUBROUTINE PRIORITY_QUEUE_SIFT_DOWN(PRIORITY_QUEUE,HEAP_POSITION,ERR,ERROR,*)
+    !Argument variables
+    TYPE(PRIORITY_QUEUE_TYPE), POINTER :: PRIORITY_QUEUE
+    INTEGER(INTG), INTENT(IN) :: HEAP_POSITION
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    INTEGER(INTG) :: pq_father, pq_cur_position, pq_cur_object
+    REAL(DP) :: pq_cur_value
+    
+    CALL ENTERS("PRIORITY_QUEUE_SIFT_DOWN",ERR,ERROR,*999)
+    
+    pq_cur_position=HEAP_POSITION
+    DO WHILE (pq_cur_position > 1)
+      pq_cur_value=PRIORITY_QUEUE%VALUE_HEAP(pq_cur_position)
+      pq_cur_object=PRIORITY_QUEUE%OBJECT_HEAP(pq_cur_position)
+      pq_father=pq_cur_position/2
+      IF (PRIORITY_QUEUE%VALUE_HEAP(pq_father) > pq_cur_value) THEN
+        ! swap them
+        
+        ! update arrays at pq_cur_position
+        PRIORITY_QUEUE%VALUE_HEAP(pq_cur_position)=PRIORITY_QUEUE%VALUE_HEAP(pq_father)
+        PRIORITY_QUEUE%OBJECT_HEAP(pq_cur_position)=PRIORITY_QUEUE%OBJECT_HEAP(pq_father)
+        
+        ! update arrays at pq_father
+        PRIORITY_QUEUE%VALUE_HEAP(pq_father)=pq_cur_value
+        PRIORITY_QUEUE%OBJECT_HEAP(pq_father)=pq_cur_object
+        
+        ! update position map
+        PRIORITY_QUEUE%OBJECT_TO_HEAP_POSITION_MAP(PRIORITY_QUEUE%OBJECT_HEAP(pq_father))=pq_father
+        PRIORITY_QUEUE%OBJECT_TO_HEAP_POSITION_MAP(PRIORITY_QUEUE%OBJECT_HEAP(pq_cur_position))=pq_cur_position
+        
+        pq_cur_position=pq_father
+      ELSE
+        ! stop loop
+        pq_cur_position=0
+      ENDIF
+    ENDDO
+    
+    CALL EXITS("PRIORITY_QUEUE_SIFT_DOWN")
+    RETURN
+999 CALL ERRORS("PRIORITY_QUEUE_SIFT_DOWN",ERR,ERROR)    
+    CALL EXITS("PRIORITY_QUEUE_SIFT_DOWN")
+    RETURN 1
+   
+  END SUBROUTINE PRIORITY_QUEUE_SIFT_DOWN
+  
+  !
+  !================================================================================================================================
+  !
+  
+  SUBROUTINE TREE_SET_FIND(TREE_SET_ROOT,VALUE,RESULT_NODE,RESULT_FATHER_NODE,ERR,ERROR,*)
+    !Argument variables
+    TYPE(TREE_SET_TYPE), POINTER :: TREE_SET_ROOT
+    INTEGER(INTG), INTENT(IN) :: VALUE
+    TYPE(TREE_SET_TYPE), POINTER, INTENT(OUT) :: RESULT_NODE
+    TYPE(TREE_SET_TYPE), POINTER, INTENT(OUT) :: RESULT_FATHER_NODE
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    TYPE(TREE_SET_TYPE), POINTER :: ROOT, CURRENT_NODE, LAST_NODE
+    
+    CALL ENTERS("TREE_SET_FIND",ERR,ERROR,*999)
+    
+    NULLIFY(RESULT_FATHER_NODE)
+    RESULT_NODE=>TREE_SET_ROOT
+    DO WHILE(ASSOCIATED(RESULT_NODE) .AND. RESULT_NODE%VALUE/=VALUE)
+      RESULT_FATHER_NODE=>RESULT_NODE
+      IF (VALUE < RESULT_NODE%VALUE) THEN
+        RESULT_NODE=>RESULT_NODE%LEFT
+      ELSE
+        RESULT_NODE=>RESULT_NODE%RIGHT
+      ENDIF
+    ENDDO
+    
+    CALL EXITS("TREE_SET_FIND")
+    RETURN
+999 CALL ERRORS("TREE_SET_FIND",ERR,ERROR)    
+    CALL EXITS("TREE_SET_FIND")
+    RETURN 1
+   
+  END SUBROUTINE TREE_SET_FIND
+  
+  !
+  !================================================================================================================================
+  !
+  
+  SUBROUTINE TREE_SET_ADD_TO_FATHER(TREE_SET_ROOT,VALUE,FATHER_NODE,ERR,ERROR,*)
+    !Argument variables
+    TYPE(TREE_SET_TYPE), POINTER, INTENT(INOUT) :: TREE_SET_ROOT
+    INTEGER(INTG), INTENT(IN) :: VALUE
+    TYPE(TREE_SET_TYPE), POINTER :: FATHER_NODE
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    TYPE(TREE_SET_TYPE), POINTER :: NEW_NODE
+    
+    CALL ENTERS("TREE_SET_ADD_TO_FATHER",ERR,ERROR,*999)
+    
+    ! Create new node
+    NULLIFY(NEW_NODE)
+    ALLOCATE(NEW_NODE)
+    NEW_NODE%VALUE=VALUE
+    NULLIFY(NEW_NODE%LEFT)
+    NULLIFY(NEW_NODE%RIGHT)
+    ! Append it to the tree
+    IF (.NOT. ASSOCIATED(FATHER_NODE)) THEN
+      ! Tree empty => set it as root
+      TREE_SET_ROOT=>NEW_NODE
+    ELSE
+      ! Append it to found father
+      IF (NEW_NODE%VALUE < FATHER_NODE%VALUE) THEN
+        FATHER_NODE%LEFT=>NEW_NODE
+      ELSE
+        FATHER_NODE%RIGHT=>NEW_NODE
+      ENDIF
+    ENDIF
+    
+    CALL EXITS("TREE_SET_ADD_TO_FATHER")
+    RETURN
+999 CALL ERRORS("TREE_SET_ADD_TO_FATHER",ERR,ERROR)    
+    CALL EXITS("TREE_SET_ADD_TO_FATHER")
+    RETURN 1
+   
+  END SUBROUTINE TREE_SET_ADD_TO_FATHER
+  
+  !
+  !================================================================================================================================
+  !
+  
+  SUBROUTINE TREE_SET_ADD(TREE_SET_ROOT,VALUE,ERR,ERROR,*)
+    !Argument variables
+    TYPE(TREE_SET_TYPE), POINTER, INTENT(INOUT) :: TREE_SET_ROOT
+    INTEGER(INTG), INTENT(IN) :: VALUE
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    TYPE(TREE_SET_TYPE), POINTER :: FATHER_NODE, NODE
+    
+    CALL ENTERS("TREE_SET_ADD",ERR,ERROR,*999)
+    
+    CALL TREE_SET_FIND(TREE_SET_ROOT,VALUE,NODE,FATHER_NODE,ERR,ERROR,*999)
+    CALL TREE_SET_ADD_TO_FATHER(TREE_SET_ROOT,VALUE,FATHER_NODE,ERR,ERROR,*999)
+    
+    CALL EXITS("TREE_SET_ADD")
+    RETURN
+999 CALL ERRORS("TREE_SET_ADD",ERR,ERROR)    
+    CALL EXITS("TREE_SET_ADD")
+    RETURN 1
+   
+  END SUBROUTINE TREE_SET_ADD
+  
+  !
+  !================================================================================================================================
+  !
+  
+  RECURSIVE SUBROUTINE TREE_SET_DESTROY(TREE_SET_ROOT,ERR,ERROR,*)
+    !Argument variables
+    TYPE(TREE_SET_TYPE), POINTER, INTENT(INOUT) :: TREE_SET_ROOT
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(TREE_SET_TYPE), POINTER :: NODE
+    
+    CALL ENTERS("TREE_SET_DESTROY",ERR,ERROR,*999)
+    
+    IF (.NOT. ASSOCIATED(TREE_SET_ROOT)) THEN
+      CALL FLAG_ERROR("TREE_SET_ROOT is not associated.",ERR,ERROR,*999)
+    ENDIF
+    
+    IF (ASSOCIATED(TREE_SET_ROOT%LEFT)) THEN
+      CALL TREE_SET_DESTROY(TREE_SET_ROOT%LEFT,ERR,ERROR,*999)
+    ENDIF
+    IF (ASSOCIATED(TREE_SET_ROOT%RIGHT)) THEN
+      CALL TREE_SET_DESTROY(TREE_SET_ROOT%RIGHT,ERR,ERROR,*999)
+    ENDIF
+    DEALLOCATE(TREE_SET_ROOT)
+    NULLIFY(TREE_SET_ROOT)
+    
+    CALL EXITS("TREE_SET_DESTROY")
+    RETURN
+999 CALL ERRORS("TREE_SET_DESTROY",ERR,ERROR)    
+    CALL EXITS("TREE_SET_DESTROY")
+    RETURN 1
+   
+  END SUBROUTINE TREE_SET_DESTROY
+  
+  !
+  !================================================================================================================================
+  !
+  
+  !Solves a state FMM solver 
+  SUBROUTINE SOLVER_FMM_SOLVE(FMM_SOLVER,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(FMM_SOLVER_TYPE), POINTER, INTENT(IN) :: FMM_SOLVER !<A pointer to the state FMM solver to solve
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    INTEGER(INTG) :: equations_set_idx
+    REAL(DP) :: time
+    TYPE(EQUATIONS_SET_TYPE), POINTER :: EQUATIONS_SET
+    TYPE(FIELD_TYPE), POINTER :: DEPENDENT_FIELD, MATERIALS_FIELD, GEOMETRIC_FIELD, FIBRE_FIELD
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    TYPE(CONTROL_LOOP_TYPE), POINTER :: CONTROL_LOOP
+    
+    CALL ENTERS("SOLVER_FMM_SOLVE",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(FMM_SOLVER)) THEN
+      STATE_SOLVER=>FMM_SOLVER%STATE_SOLVER
+      IF(ASSOCIATED(STATE_SOLVER)) THEN
+        SELECT CASE(FMM_SOLVER%SOLVER_LIBRARY)
+        CASE(SOLVER_CMISS_LIBRARY)
+          ! Loop over the equations sets
+          DO equations_set_idx=1,STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS
+            EQUATIONS_SET=>STATE_SOLVER%EQUATIONS_SETS(equations_set_idx)%PTR
+            IF(ASSOCIATED(EQUATIONS_SET)) THEN
+              CONTROL_LOOP=>FMM_SOLVER%STATE_SOLVER%SOLVER%SOLVERS%CONTROL_LOOP
+              IF(CONTROL_LOOP%LOOP_TYPE == PROBLEM_CONTROL_TIME_LOOP_TYPE) THEN
+                IF(ASSOCIATED(CONTROL_LOOP%TIME_LOOP)) THEN
+                  ! Get time
+                  time=CONTROL_LOOP%TIME_LOOP%CURRENT_TIME
+#ifdef USEPROCPOINTER
+                  IF(ASSOCIATED(FMM_SOLVER%SPEED_FUNCTION)) THEN
+                    ! Call actual solver
+                    CALL SOLVER_FMM_SOLVE_INTERNAL(EQUATIONS_SET,equations_set_idx,FMM_SOLVER,time,ERR,ERROR,*999)
+                  ELSE
+                    CALL FLAG_ERROR("Speed function is not associated.",ERR,ERROR,*999)
+                  ENDIF
+#else
+                  CALL FLAG_ERROR("Procedure pointers are not supported by your compiler.",ERR,ERROR,*999)
+#endif
+                ELSE
+                  CALL FLAG_ERROR("CONTROL_LOOP is of type PROBLEM_CONTROL_TIME_LOOP_TYPE, but "// &
+                      & "CONTROL_LOOP%TIME_LOOP is not associated.",ERR,ERROR,*999)
+                ENDIF
+              ELSE
+                CALL FLAG_ERROR("CONTROL_LOOP is not of type PROBLEM_CONTROL_TIME_LOOP_TYPE!",ERR,ERROR,*999)
+              ENDIF
+            ELSE
+              CALL FLAG_ERROR("Equations set with index "// &
+                      & TRIM(NUMBER_TO_VSTRING(equations_set_idx,"*",ERR,ERROR))// &
+                      & " is not associated.",ERR,ERROR,*999)
+            ENDIF
+          ENDDO
+        CASE DEFAULT
+          LOCAL_ERROR="The FMM solver library of "// &
+            & TRIM(NUMBER_TO_VSTRING(FMM_SOLVER%SOLVER_LIBRARY,"*",ERR,ERROR))//" is invalid."
+          CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+        END SELECT
+      ELSE
+        CALL FLAG_ERROR("FMM solver state solver is not associated.",ERR,ERROR,*999)
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("FMM solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+    
+    CALL EXITS("SOLVER_FMM_SOLVE")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_SOLVE",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_SOLVE")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_FMM_SOLVE
+
+  !
+  !================================================================================================================================
+  !
+
+#ifdef USEPROCPOINTER
+  SUBROUTINE SOLVER_FMM_SOLVE_INTERNAL(EQUATIONS_SET,EQUATIONS_SET_INDEX,FMM_SOLVER,CURRENT_TIME,ERR,ERROR,*)
+    !Argument variables
+    TYPE(EQUATIONS_SET_TYPE), POINTER, INTENT(IN) :: EQUATIONS_SET
+    INTEGER(INTG), INTENT(IN) :: EQUATIONS_SET_INDEX
+    TYPE(FMM_SOLVER_TYPE), POINTER, INTENT(IN) :: FMM_SOLVER
+    REAL(DP), INTENT(IN) :: CURRENT_TIME
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(FIELD_TYPE), POINTER :: DEPENDENT_FIELD, MATERIALS_FIELD, GEOMETRIC_FIELD, FIBRE_FIELD
+    TYPE(MESH_NODES_TYPE), POINTER :: NODES_TOPOLOGY
+    TYPE(MESH_ELEMENTS_TYPE), POINTER :: ELEMENTS_TOPOLOGY
+    TYPE(TREE_SET_TYPE), POINTER :: CHECKED_NODES_SET, NODE_B_IN_TREE, NODE_B_IN_TREE_FATHER
+    TYPE(PRIORITY_QUEUE_TYPE), POINTER :: PRIORITY_QUEUE
+    
+    REAL(DP) :: time, act_time_a, act_time_b, new_act_time
+    INTEGER(INTG) :: node_a, node_b, node_b_idx
+    INTEGER(INTG) :: num_surr, element, element_idx
+    
+    CALL ENTERS("SOLVER_FMM_SOLVE_INTERNAL",ERR,ERROR,*999)
+    
+    ! Note: No need to check the validity of FMM_SOLVER, STATE_SOLVER, EQUATIONS_SET and FMM_SOLVER%SPEED_FUNCTION,
+    ! this has been checked before in the subroutine SOLVER_FMM_SOLVE_INTERNAL
+    
+    PRIORITY_QUEUE=>FMM_SOLVER%PRIORITY_QUEUE(EQUATIONS_SET_INDEX)%PTR
+    
+    ! Get the required fields for the problem solver
+    DEPENDENT_FIELD=>EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD
+    
+    NODES_TOPOLOGY=>DEPENDENT_FIELD%DECOMPOSITION%DOMAIN(DEPENDENT_FIELD%DECOMPOSITION%MESH_COMPONENT_NUMBER)%PTR%MESH% &
+        & TOPOLOGY(DEPENDENT_FIELD%DECOMPOSITION%MESH_COMPONENT_NUMBER)%PTR%NODES
+    ELEMENTS_TOPOLOGY=>DEPENDENT_FIELD%DECOMPOSITION%DOMAIN(DEPENDENT_FIELD%DECOMPOSITION%MESH_COMPONENT_NUMBER)%PTR%MESH% &
+        & TOPOLOGY(DEPENDENT_FIELD%DECOMPOSITION%MESH_COMPONENT_NUMBER)%PTR%ELEMENTS
+    
+    !Get act_time_a of next node to process (for loop condition)
+    IF (PRIORITY_QUEUE%HEAP_SIZE > 0) THEN
+      CALL PRIORITY_QUEUE_FIRST(PRIORITY_QUEUE,node_a,act_time_a,ERR,ERROR,*999)
+    ENDIF
+    DO WHILE(PRIORITY_QUEUE%HEAP_SIZE > 0 .AND. act_time_a <= CURRENT_TIME)
+      CALL PRIORITY_QUEUE_POP(PRIORITY_QUEUE,node_a,act_time_a,ERR,ERROR,*999)
+      
+      ! Create set of checked nodes
+      NULLIFY(CHECKED_NODES_SET)
+      num_surr=NODES_TOPOLOGY%NODES(node_a)%NUMBER_OF_SURROUNDING_ELEMENTS
+      DO element_idx=1,num_surr
+        element=NODES_TOPOLOGY%NODES(node_a)%SURROUNDING_ELEMENTS(element_idx)
+        DO node_b_idx=1,size(ELEMENTS_TOPOLOGY%ELEMENTS(element)%MESH_ELEMENT_NODES,1)
+          node_b=ELEMENTS_TOPOLOGY%ELEMENTS(element)%MESH_ELEMENT_NODES(node_b_idx)
+          ! Check, if we have already processed the edge "node_a -> node_b"
+          CALL TREE_SET_FIND(CHECKED_NODES_SET,node_b,NODE_B_IN_TREE,NODE_B_IN_TREE_FATHER,ERR,ERROR,*999)
+          IF (.NOT. ASSOCIATED(NODE_B_IN_TREE)) THEN ! haven't found node_b in set of checked nodes
+            ! Add node_b to set of checked nodes
+            CALL TREE_SET_ADD_TO_FATHER(CHECKED_NODES_SET,node_b,NODE_B_IN_TREE_FATHER,ERR,ERROR,*999)
+            CALL FIELD_PARAMETER_SET_GET_NODE(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+              & FIELD_VALUES_SET_TYPE,1,1,node_b,1,act_time_b,ERR,ERROR,*999)
+            ! Relax edge "node_a -> node_b"
+            CALL SOLVER_FMM_SOLVE_RELAX(node_a,node_b,act_time_a,act_time_b,PRIORITY_QUEUE, &
+                & EQUATIONS_SET,FMM_SOLVER,ERR,ERROR,*999)
+          ENDIF ! node_b not yet processed
+        ENDDO ! node_b_idx
+      ENDDO ! element_no
+      ! Deallocate set of checked nodes
+      CALL TREE_SET_DESTROY(CHECKED_NODES_SET,ERR,ERROR,*999)
+      
+      !Get act_time_a of next node to process (for loop condition)
+      IF (PRIORITY_QUEUE%HEAP_SIZE > 0) THEN
+        CALL PRIORITY_QUEUE_FIRST(PRIORITY_QUEUE,node_a,act_time_a,ERR,ERROR,*999)
+      ENDIF
+    ENDDO ! node_a_idx
+    
+    CALL EXITS("SOLVER_FMM_SOLVE_INTERNAL")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_SOLVE_INTERNAL",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_SOLVE_INTERNAL")
+    RETURN 1
+
+  END SUBROUTINE SOLVER_FMM_SOLVE_INTERNAL
+#endif
+  
+  !
+  !================================================================================================================================
+  !
+
+#ifdef USEPROCPOINTER
+  SUBROUTINE SOLVER_FMM_SOLVE_RELAX(node_a,node_b,act_time_a,act_time_b,PRIORITY_QUEUE,EQUATIONS_SET,FMM_SOLVER,ERR,ERROR, *)
+    !Argument variables
+    INTEGER(INTG), INTENT(IN) :: node_a, node_b
+    REAL(DP), INTENT(IN) :: act_time_a, act_time_b
+    TYPE(PRIORITY_QUEUE_TYPE), POINTER :: PRIORITY_QUEUE
+    TYPE(EQUATIONS_SET_TYPE), POINTER :: EQUATIONS_SET
+    TYPE(FMM_SOLVER_TYPE), POINTER :: FMM_SOLVER
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    REAL(DP) :: time, new_act_time
+    
+    CALL ENTERS("SOLVER_FMM_SOLVE_RELAX",ERR,ERROR,*999)
+    
+    IF (act_time_b > act_time_a) THEN
+      CALL FMM_SOLVER%SPEED_FUNCTION(EQUATIONS_SET,node_a,node_b,time,ERR,ERROR)
+      IF (ERR /= 0) THEN
+        GOTO 999
+      ENDIF
+      new_act_time = act_time_a + time
+      IF (new_act_time < act_time_b) THEN
+        CALL FIELD_PARAMETER_SET_UPDATE_NODE(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+            & FIELD_VALUES_SET_TYPE,1,1,node_b,1,new_act_time,ERR,ERROR,*999)
+        CALL PRIORITY_QUEUE_UPDATE_OBJECT_VALUE(PRIORITY_QUEUE,node_b,new_act_time,ERR,ERROR,*999)
+      ENDIF
+    ENDIF
+    
+    CALL EXITS("SOLVER_FMM_SOLVE_RELAX")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_SOLVE_RELAX",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_SOLVE_RELAX")
+    RETURN 1
+
+  END SUBROUTINE SOLVER_FMM_SOLVE_RELAX
+#endif
+  
+  !
+  !================================================================================================================================
+  !
+  
+  SUBROUTINE SOLVER_FMM_SPEED_FUNCTION_ONE(EQUATIONS_SET,NODE_A,NODE_B,TIME,ERR,ERROR)
+    !Argument variables
+    TYPE(EQUATIONS_SET_TYPE), POINTER :: EQUATIONS_SET
+    INTEGER(INTG), INTENT(IN) :: NODE_A
+    INTEGER(INTG), INTENT(IN) :: NODE_B
+    REAL(DP), INTENT(OUT) :: TIME
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local variables
+    !none
+    
+    CALL ENTERS("SOLVER_FMM_SPEED_FUNCTION_ONE",ERR,ERROR,*999)
+    
+    IF (NODE_A == NODE_B) THEN
+      TIME = 0.0_DP
+    ELSE
+      TIME = 1.0_DP
+    ENDIF
+    
+    CALL EXITS("SOLVER_FMM_SPEED_FUNCTION_ONE")
+    RETURN
+999 CALL ERRORS("SOLVER_FMM_SPEED_FUNCTION_ONE",ERR,ERROR)    
+    CALL EXITS("SOLVER_FMM_SPEED_FUNCTION_ONE")
+    RETURN 1
+    
+  END SUBROUTINE
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Adds equations sets to solver. \see OPENCMISS::CMISSSolverEquationsSetAdd
+  SUBROUTINE SOLVER_EQUATIONS_SET_ADD(SOLVER,EQUATIONS_SET,EQUATIONS_SET_INDEX,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(SOLVER_TYPE), POINTER :: SOLVER !<A pointer the solver to add the equations set to.
+    TYPE(EQUATIONS_SET_TYPE), POINTER :: EQUATIONS_SET !<A pointer to the equations set to add
+    INTEGER(INTG), INTENT(OUT) :: EQUATIONS_SET_INDEX !<On exit, the index of the equations set that has been added
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    TYPE(EQUATIONS_SET_PTR_TYPE), ALLOCATABLE :: NEW_EQUATIONS_SETS(:)
+    TYPE(STATE_SOLVER_TYPE), POINTER :: STATE_SOLVER
+    INTEGER(INTG) :: equations_set_idx
+    
+    CALL ENTERS("SOLVER_EQUATIONS_SET_ADD",ERR,ERROR,*999)
+
+    IF(ASSOCIATED(SOLVER)) THEN
+      IF(SOLVER%SOLVER_FINISHED) THEN
+        CALL FLAG_ERROR("Solver equations has already been finished.",ERR,ERROR,*999)
+      ELSE
+        SELECT CASE(SOLVER%SOLVE_TYPE)
+        CASE(SOLVER_STATE_TYPE)
+          STATE_SOLVER=>SOLVER%STATE_SOLVER
+          IF(ASSOCIATED(STATE_SOLVER)) THEN
+            IF(ASSOCIATED(EQUATIONS_SET)) THEN
+              ALLOCATE(NEW_EQUATIONS_SETS(STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS+1), STAT=ERR)
+              IF(ERR/=0) CALL FLAG_ERROR("Could not allocate equations sets.",ERR,ERROR,*999)
+              DO equations_set_idx=1,STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS
+                NEW_EQUATIONS_SETS(equations_set_idx)%PTR=>STATE_SOLVER%EQUATIONS_SETS(equations_set_idx)%PTR
+              ENDDO !equations_set_idx
+              STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS=STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS+1
+              NEW_EQUATIONS_SETS(STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS)%PTR=>EQUATIONS_SET
+              CALL MOVE_ALLOC(NEW_EQUATIONS_SETS,STATE_SOLVER%EQUATIONS_SETS)
+              EQUATIONS_SET_INDEX=STATE_SOLVER%NUMBER_OF_EQUATIONS_SETS
+            ELSE
+              CALL FLAG_ERROR("Equations set is not associated.",ERR,ERROR,*999)
+            ENDIF
+          ELSE
+            CALL FLAG_ERROR("State solver is not associated.",ERR,ERROR,*999)
+          ENDIF
+        CASE DEFAULT
+          LOCAL_ERROR="Cannot add equations set to a solver of type "// &
+            & TRIM(NUMBER_TO_VSTRING(SOLVER%SOLVE_TYPE,"*",ERR,ERROR))// &
+            & "."
+          CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+        END SELECT
+      ENDIF
+    ELSE
+      CALL FLAG_ERROR("Solver is not associated.",ERR,ERROR,*999)
+    ENDIF
+        
+    CALL EXITS("SOLVER_EQUATIONS_SET_ADD")
+    RETURN
+999 IF(ALLOCATED(NEW_EQUATIONS_SETS)) DEALLOCATE(NEW_EQUATIONS_SETS)
+    CALL ERRORS("SOLVER_EQUATIONS_SET_ADD",ERR,ERROR)    
+    CALL EXITS("SOLVER_EQUATIONS_SET_ADD")
+    RETURN 1
+   
+  END SUBROUTINE SOLVER_EQUATIONS_SET_ADD
 
   !
   !================================================================================================================================
@@ -15363,6 +16665,8 @@ CONTAINS
               CALL SOLVER_OPTIMISER_INITIALISE(SOLVER,ERR,ERROR,*999)
             CASE(SOLVER_CELLML_EVALUATOR_TYPE)
               CALL SOLVER_CELLML_EVALUATOR_INITIALISE(SOLVER,ERR,ERROR,*999)
+            CASE(SOLVER_STATE_TYPE)
+              CALL SOLVER_STATE_INITIALISE(SOLVER,ERR,ERROR,*999)
             CASE DEFAULT
               LOCAL_ERROR="The specified solve type of "//TRIM(NUMBER_TO_VSTRING(SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
               CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
@@ -15383,6 +16687,8 @@ CONTAINS
               CALL SOLVER_OPTIMISER_FINALISE(SOLVER%OPTIMISER_SOLVER,ERR,ERROR,*999)
             CASE(SOLVER_CELLML_EVALUATOR_TYPE)
               CALL SOLVER_CELLML_EVALUATOR_FINALISE(SOLVER%CELLML_EVALUATOR_SOLVER,ERR,ERROR,*999)
+            CASE(SOLVER_STATE_TYPE)
+              CALL SOLVER_STATE_FINALISE(SOLVER%STATE_SOLVER,ERR,ERROR,*999)
             CASE DEFAULT
               LOCAL_ERROR="The solver solve type of "//TRIM(NUMBER_TO_VSTRING(SOLVER%SOLVE_TYPE,"*",ERR,ERROR))//" is invalid."
               CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
@@ -15411,6 +16717,8 @@ CONTAINS
       CALL SOLVER_EIGENPROBLEM_FINALISE(SOLVER%EIGENPROBLEM_SOLVER,DUMMY_ERR,DUMMY_ERROR,*998)
     CASE(SOLVER_OPTIMISER_TYPE)
       CALL SOLVER_OPTIMISER_FINALISE(SOLVER%OPTIMISER_SOLVER,DUMMY_ERR,DUMMY_ERROR,*998)
+    CASE(SOLVER_STATE_TYPE)
+      CALL SOLVER_STATE_FINALISE(SOLVER%STATE_SOLVER,DUMMY_ERR,DUMMY_ERROR,*998)
     END SELECT
 998 CALL ERRORS("SOLVER_TYPE_SET",ERR,ERROR)    
     CALL EXITS("SOLVER_TYPE_SET")
