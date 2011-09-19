@@ -15430,12 +15430,15 @@ CONTAINS
             max_node_id=node
           ENDIF
         ENDDO
+        !TODO: Take into account ghosting nodes
         
         ! Create priority queue
         num_nodes=NODES_MAPPING%INTERNAL_FINISH-NODES_MAPPING%INTERNAL_START+1
+        !TODO: Take into account ghosting nodes
         CALL PRIORITY_QUEUE_CREATE_WITH_SIZE(FMM_SOLVER%PRIORITY_QUEUE(i)%PTR,num_nodes,max_node_id,ERR,ERROR,*999)
         
         ! Add all activated nodes to priority queue
+        !TODO: Take into account ghosting nodes
         DO node_idx=NODES_MAPPING%INTERNAL_START,NODES_MAPPING%INTERNAL_FINISH
           node=NODES_MAPPING%DOMAIN_LIST(node_idx)
           CALL FIELD_PARAMETER_SET_GET_NODE(DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
@@ -16441,11 +16444,19 @@ CONTAINS
     ELEMENTS_TOPOLOGY=>DEPENDENT_FIELD%DECOMPOSITION%DOMAIN(DEPENDENT_FIELD%DECOMPOSITION%MESH_COMPONENT_NUMBER)%PTR%MESH% &
         & TOPOLOGY(DEPENDENT_FIELD%DECOMPOSITION%MESH_COMPONENT_NUMBER)%PTR%ELEMENTS
     
+    ALLOCATE(current_time_sendbuf(1))
+    ALLOCATE(current_time_recvbuf(1))
+    
+    all_processors_current_time=-HUGE(0.0_DP)
+    
+    DO WHILE(all_processors_current_time <= CURRENT_TIME)
+    
     !Get act_time_a of next node to process (for loop condition)
     IF (PRIORITY_QUEUE%HEAP_SIZE > 0) THEN
       CALL PRIORITY_QUEUE_FIRST(PRIORITY_QUEUE,node_a,act_time_a,ERR,ERROR,*999)
     ENDIF
-    DO WHILE(PRIORITY_QUEUE%HEAP_SIZE > 0 .AND. act_time_a <= CURRENT_TIME)
+    num_nodes_processed = 0
+    DO WHILE(PRIORITY_QUEUE%HEAP_SIZE > 0 .AND. act_time_a <= CURRENT_TIME .AND. num_nodes_processed < 20)
       CALL PRIORITY_QUEUE_POP(PRIORITY_QUEUE,node_a,act_time_a,ERR,ERROR,*999)
       
       ! Create set of checked nodes
@@ -16475,7 +16486,49 @@ CONTAINS
       IF (PRIORITY_QUEUE%HEAP_SIZE > 0) THEN
         CALL PRIORITY_QUEUE_FIRST(PRIORITY_QUEUE,node_a,act_time_a,ERR,ERROR,*999)
       ENDIF
+      num_nodes_processed = num_nodes_processed + 1
     ENDDO ! node_a_idx
+    
+    CALL FIELD_PARAMETER_SET_UPDATE_START(DEPENDENT_FIELD,...)
+    
+    ! Work will often be very unbalanced, so there will be undesired waiting times here that we have to make use of
+    CALL FIELD_PARAMETER_SET_UPDATE_ISFINISHED(DEPENDENT_FIELD,finished,...)
+    DO WHILE(.NOT. finished)
+      ! TODO: precalculate travel times here and write them to a cache that the subroutine SOLVER_FMM_SOLVE_RELAX
+      !       can use instead of calling FMM_SOLVER%SPEED_FUNCTION
+      CALL FIELD_PARAMETER_SET_UPDATE_ISFINISHED(DEPENDENT_FIELD,finished,...)
+    ENDDO
+    CALL FIELD_PARAMETER_SET_UPDATE_FINISH(DEPENDENT_FIELD,...)
+    
+    ! Check the ghosting nodes that have been updated by FIELD_UPDATE:
+    ! 1. Send the changed nodes back to the priority queue (to be processed again later)
+    ! 2. Check, if we are done for now (taking into account the updated values of the ghosting nodes)
+    my_proc_current_time=act_time_a
+    CALL FIELD_UPDATE_GET_UPDATED_NODES(updated_nodes)
+    DO i=1,SIZE(updated_nodes,1)
+      ! Update the activation time of this node in the priority queue (if it's still in there) or re-add it to the
+      ! priority queue (it is has already been processed)
+      CALL FIELD_PARAMETER_SET_UPDATE_NODE(EQUATIONS_SET%DEPENDENT%DEPENDENT_FIELD,FIELD_U_VARIABLE_TYPE, &
+          & FIELD_VALUES_SET_TYPE,1,1,updated_nodes(i)%node_id,1,act_time,ERR,ERROR,*999)
+      CALL PRIORITY_QUEUE_UPDATE_OBJECT_VALUE(PRIORITY_QUEUE,updated_nodes(i)%node_id,act_time,ERR,ERROR,*999)
+      
+      ! Update the state of this processor
+      IF (act_time < my_proc_current_time) THEN
+        my_proc_current_time = act_time
+      ENDIF
+    ENDDO
+    
+    ! Calculate the global state (based on all local states)
+    current_time_sendbuf(1)=my_proc_current_time
+    CALL MPI_ALLREDUCE(current_time_sendbuf, current_time_recvbuf, 1, MPI_INTEGER, MPI_MIN, &
+        & COMPUTATIONAL_ENVIRONMENT%MPI_COMM, MPI_IERROR)
+    all_processors_current_time = current_time_recvbuf(1)
+    
+    ENDDO
+    
+    DEALLOCATE(current_time_sendbuf)
+    DEALLOCATE(current_time_recvbuf)
+
     
     CALL EXITS("SOLVER_FMM_SOLVE_INTERNAL")
     RETURN
