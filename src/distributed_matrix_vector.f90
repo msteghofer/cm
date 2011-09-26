@@ -235,7 +235,12 @@ MODULE DISTRIBUTED_MATRIX_VECTOR
     MODULE PROCEDURE DISTRIBUTED_VECTOR_VALUES_SET_L
     MODULE PROCEDURE DISTRIBUTED_VECTOR_VALUES_SET_L1
   END INTERFACE !DISTRIBUTED_VECTOR_VALUES_SET
-
+  
+  INTERFACE DISTRIBUTED_VECTOR_UPDATE_FINISH
+    MODULE PROCEDURE DISTRIBUTED_VECTOR_UPDATE_FINISH_GET_CHANGED_VALUES
+    MODULE PROCEDURE DISTRIBUTED_VECTOR_UPDATE_FINISH_DONT_GET_CHANGED_VALUES
+  END INTERFACE !DISTRIBUTED_VECTOR_UPDATE_FINISH
+  
   PUBLIC DISTRIBUTED_MATRIX_VECTOR_CMISS_TYPE,DISTRIBUTED_MATRIX_VECTOR_PETSC_TYPE
 
   PUBLIC DISTRIBUTED_MATRIX_VECTOR_INTG_TYPE,DISTRIBUTED_MATRIX_VECTOR_SP_TYPE,DISTRIBUTED_MATRIX_VECTOR_DP_TYPE, &
@@ -7194,17 +7199,27 @@ CONTAINS
   !
 
   !>Finishes the (ghost) update procedure for a distributed vector. This routine will wait until all transfers have completed!
-  SUBROUTINE DISTRIBUTED_VECTOR_UPDATE_FINISH(DISTRIBUTED_VECTOR,ERR,ERROR,*)
+  SUBROUTINE DISTRIBUTED_VECTOR_UPDATE_FINISH_INTERNAL(DISTRIBUTED_VECTOR,GET_CHANGED_VALUES, &
+      & CHANGED_VALUES,NUM_CHANGED_VALUES,ERR,ERROR,*)
 
     !Argument variables
     TYPE(DISTRIBUTED_VECTOR_TYPE), POINTER :: DISTRIBUTED_VECTOR !<A pointer to the distributed vector
+    LOGICAL, INTENT(IN) :: GET_CHANGED_VALUES !<Indicates, if the caller wants to receive a list of changed values
+                                              !!in CHANGED_VALUES and NUM_CHANGED_VALUES
+    INTEGER(INTG), ALLOCATABLE, INTENT(OUT) :: CHANGED_VALUES(:) !<After return CHANGED_VALUES(1:NUM_CHANGED_VALUES) are
+                                                                 !!the indices of the values changed during this update
+    INTEGER(INTG), INTENT(OUT) :: NUM_CHANGED_VALUES !<After return the number of values changed during this update
     INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
     TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
     !Local Variables
-    INTEGER(INTG) :: domain_idx,i,NUMBER_OF_COMPUTATIONAL_NODES
+    INTEGER(INTG) :: domain_idx,i,NUMBER_OF_COMPUTATIONAL_NODES,max_num_changed_values,target_index
+    INTEGER(INTG) :: new_value_intg
+    LOGICAL :: new_value_l
+    REAL(SP) :: new_value_sp
+    REAL(DP) :: new_value_dp
     TYPE(VARYING_STRING) :: LOCAL_ERROR
    
-    CALL ENTERS("DISTRIBUTED_VECTOR_UPDATE_FINISH",ERR,ERROR,*999)
+    CALL ENTERS("DISTRIBUTED_VECTOR_UPDATE_FINISH_INTERNAL",ERR,ERROR,*999)
 
     IF(ASSOCIATED(DISTRIBUTED_VECTOR)) THEN
       IF(DISTRIBUTED_VECTOR%VECTOR_FINISHED) THEN
@@ -7215,36 +7230,103 @@ CONTAINS
               NUMBER_OF_COMPUTATIONAL_NODES=COMPUTATIONAL_NODES_NUMBER_GET(ERR,ERROR)
               IF(ERR/=0) GOTO 999
               IF(NUMBER_OF_COMPUTATIONAL_NODES>1) THEN
+                IF(GET_CHANGED_VALUES) THEN
+                  ! Calculate the maximum possible number of changed values to allocate the array of changed values
+                  max_num_changed_values=0
+                  DO domain_idx=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%NUMBER_OF_ADJACENT_DOMAINS
+                    max_num_changed_values=max_num_changed_values + &
+                        & DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)%NUMBER_OF_RECEIVE_GHOSTS
+                  ENDDO
+                  ALLOCATE(CHANGED_VALUES(max_num_changed_values))
+                  NUM_CHANGED_VALUES=0
+                ENDIF
                 CALL DISTRIBUTED_VECTOR_UPDATE_WAITFINISHED(DISTRIBUTED_VECTOR,ERR,ERROR,*999)
                 !Copy the receive buffers back to the ghost positions in the data vector
                 DO domain_idx=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%NUMBER_OF_ADJACENT_DOMAINS
                   SELECT CASE(DISTRIBUTED_VECTOR%DATA_TYPE)
                   CASE(MATRIX_VECTOR_INTG_TYPE)
-                    DO i=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)%NUMBER_OF_RECEIVE_GHOSTS
-                      DISTRIBUTED_VECTOR%CMISS%DATA_INTG(DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)% &
-                        & LOCAL_GHOST_RECEIVE_INDICES(i))=DISTRIBUTED_VECTOR%CMISS%TRANSFERS(domain_idx)%RECEIVE_BUFFER_INTG(i)
-                    ENDDO !i
+                    IF(GET_CHANGED_VALUES) THEN
+                      DO i=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)%NUMBER_OF_RECEIVE_GHOSTS
+                        target_index=DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)% &
+                          & LOCAL_GHOST_RECEIVE_INDICES(i)
+                        new_value_intg=DISTRIBUTED_VECTOR%CMISS%TRANSFERS(domain_idx)%RECEIVE_BUFFER_INTG(i)
+                        IF(DISTRIBUTED_VECTOR%CMISS%DATA_INTG(target_index)/=new_value_intg) THEN
+                          DISTRIBUTED_VECTOR%CMISS%DATA_INTG(target_index)=new_value_intg
+                          NUM_CHANGED_VALUES=NUM_CHANGED_VALUES+1
+                          CHANGED_VALUES(NUM_CHANGED_VALUES)=target_index
+                        ENDIF
+                      ENDDO !i
+                    ELSE
+                      DO i=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)%NUMBER_OF_RECEIVE_GHOSTS
+                        DISTRIBUTED_VECTOR%CMISS%DATA_INTG(DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)% &
+                          & LOCAL_GHOST_RECEIVE_INDICES(i))=DISTRIBUTED_VECTOR%CMISS%TRANSFERS(domain_idx)%RECEIVE_BUFFER_INTG(i)
+                      ENDDO !i
+                    ENDIF
                   CASE(MATRIX_VECTOR_SP_TYPE)
-                    DO i=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)%NUMBER_OF_RECEIVE_GHOSTS
-                      DISTRIBUTED_VECTOR%CMISS%DATA_SP(DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)% &
-                        & LOCAL_GHOST_RECEIVE_INDICES(i))=DISTRIBUTED_VECTOR%CMISS%TRANSFERS(domain_idx)%RECEIVE_BUFFER_SP(i)
-                    ENDDO !i
+                    IF(GET_CHANGED_VALUES) THEN
+                      DO i=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)%NUMBER_OF_RECEIVE_GHOSTS
+                        target_index=DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)% &
+                          & LOCAL_GHOST_RECEIVE_INDICES(i)
+                        new_value_sp=DISTRIBUTED_VECTOR%CMISS%TRANSFERS(domain_idx)%RECEIVE_BUFFER_SP(i)
+                        IF(DISTRIBUTED_VECTOR%CMISS%DATA_SP(target_index)/=new_value_sp) THEN
+                          DISTRIBUTED_VECTOR%CMISS%DATA_SP(target_index)=new_value_sp
+                          NUM_CHANGED_VALUES=NUM_CHANGED_VALUES+1
+                          CHANGED_VALUES(NUM_CHANGED_VALUES)=target_index
+                        ENDIF
+                      ENDDO !i
+                    ELSE
+                      DO i=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)%NUMBER_OF_RECEIVE_GHOSTS
+                        DISTRIBUTED_VECTOR%CMISS%DATA_SP(DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)% &
+                          & LOCAL_GHOST_RECEIVE_INDICES(i))=DISTRIBUTED_VECTOR%CMISS%TRANSFERS(domain_idx)%RECEIVE_BUFFER_SP(i)
+                      ENDDO !i
+                    ENDIF
                   CASE(MATRIX_VECTOR_DP_TYPE)
-                    DO i=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)%NUMBER_OF_RECEIVE_GHOSTS
-                      DISTRIBUTED_VECTOR%CMISS%DATA_DP(DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)% &
-                        & LOCAL_GHOST_RECEIVE_INDICES(i))=DISTRIBUTED_VECTOR%CMISS%TRANSFERS(domain_idx)%RECEIVE_BUFFER_DP(i)
-                    ENDDO !i
+                    IF(GET_CHANGED_VALUES) THEN
+                      DO i=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)%NUMBER_OF_RECEIVE_GHOSTS
+                        target_index=DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)% &
+                          & LOCAL_GHOST_RECEIVE_INDICES(i)
+                        new_value_dp=DISTRIBUTED_VECTOR%CMISS%TRANSFERS(domain_idx)%RECEIVE_BUFFER_DP(i)
+                        IF(DISTRIBUTED_VECTOR%CMISS%DATA_DP(target_index)/=new_value_dp) THEN
+                          DISTRIBUTED_VECTOR%CMISS%DATA_DP(target_index)=new_value_dp
+                          NUM_CHANGED_VALUES=NUM_CHANGED_VALUES+1
+                          CHANGED_VALUES(NUM_CHANGED_VALUES)=target_index
+                        ENDIF
+                      ENDDO !i
+                    ELSE
+                      DO i=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)%NUMBER_OF_RECEIVE_GHOSTS
+                        DISTRIBUTED_VECTOR%CMISS%DATA_DP(DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)% &
+                          & LOCAL_GHOST_RECEIVE_INDICES(i))=DISTRIBUTED_VECTOR%CMISS%TRANSFERS(domain_idx)%RECEIVE_BUFFER_DP(i)
+                      ENDDO !i
+                    ENDIF
                   CASE(MATRIX_VECTOR_L_TYPE)
-                    DO i=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)%NUMBER_OF_RECEIVE_GHOSTS
-                      DISTRIBUTED_VECTOR%CMISS%DATA_L(DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)% &
-                        & LOCAL_GHOST_RECEIVE_INDICES(i))=DISTRIBUTED_VECTOR%CMISS%TRANSFERS(domain_idx)%RECEIVE_BUFFER_L(i)
-                    ENDDO !i
+                    IF(GET_CHANGED_VALUES) THEN
+                      DO i=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)%NUMBER_OF_RECEIVE_GHOSTS
+                        target_index=DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)% &
+                          & LOCAL_GHOST_RECEIVE_INDICES(i)
+                        new_value_l=DISTRIBUTED_VECTOR%CMISS%TRANSFERS(domain_idx)%RECEIVE_BUFFER_L(i)
+                        IF(DISTRIBUTED_VECTOR%CMISS%DATA_L(target_index).neqv.new_value_l) THEN
+                          DISTRIBUTED_VECTOR%CMISS%DATA_L(target_index)=new_value_l
+                          NUM_CHANGED_VALUES=NUM_CHANGED_VALUES+1
+                          CHANGED_VALUES(NUM_CHANGED_VALUES)=target_index
+                        ENDIF
+                      ENDDO !i
+                    ELSE
+                      DO i=1,DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)%NUMBER_OF_RECEIVE_GHOSTS
+                        DISTRIBUTED_VECTOR%CMISS%DATA_L(DISTRIBUTED_VECTOR%DOMAIN_MAPPING%ADJACENT_DOMAINS(domain_idx)% &
+                          & LOCAL_GHOST_RECEIVE_INDICES(i))=DISTRIBUTED_VECTOR%CMISS%TRANSFERS(domain_idx)%RECEIVE_BUFFER_L(i)
+                      ENDDO !i
+                    ENDIF
                   CASE DEFAULT
                     LOCAL_ERROR="The distributed vector data type of "// &
                       & TRIM(NUMBER_TO_VSTRING(DISTRIBUTED_VECTOR%DATA_TYPE,"*",ERR,ERROR))//" is invalid."
                     CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
                   END SELECT
                 ENDDO !domain_idx
+              ELSE
+                IF (GET_CHANGED_VALUES) THEN
+                  NUM_CHANGED_VALUES=0
+                  ALLOCATE(CHANGED_VALUES(0))
+                ENDIF
               ENDIF
             ELSE
               CALL FLAG_ERROR("Distributed vector domain mapping is not associated.",ERR,ERROR,*999)
@@ -7253,6 +7335,9 @@ CONTAINS
             CALL FLAG_ERROR("Distributed vector CMISS is not associated.",ERR,ERROR,*999)
           ENDIF
         CASE(DISTRIBUTED_MATRIX_VECTOR_PETSC_TYPE)
+          IF(GET_CHANGED_VALUES) THEN
+            CALL FLAG_ERROR("GET_CHANGED_VALUES is not implemented for PetSc-type distributed vectors.",ERR,ERROR,*999)
+          ENDIF
           IF(ASSOCIATED(DISTRIBUTED_VECTOR%PETSC)) THEN
             IF(DISTRIBUTED_VECTOR%PETSC%USE_OVERRIDE_VECTOR) THEN
               CALL PETSC_VECASSEMBLYEND(DISTRIBUTED_VECTOR%PETSC%OVERRIDE_VECTOR,ERR,ERROR,*999)
@@ -7328,12 +7413,12 @@ CONTAINS
       END SELECT
     ENDIF
     
-    CALL EXITS("DISTRIBUTED_VECTOR_UPDATE_FINISH")
+    CALL EXITS("DISTRIBUTED_VECTOR_UPDATE_FINISH_INTERNAL")
     RETURN
-999 CALL ERRORS("DISTRIBUTED_VECTOR_UPDATE_FINISH",ERR,ERROR)
-    CALL EXITS("DISTRIBUTED_VECTOR_UPDATE_FINISH")
+999 CALL ERRORS("DISTRIBUTED_VECTOR_UPDATE_FINISH_INTERNAL",ERR,ERROR)
+    CALL EXITS("DISTRIBUTED_VECTOR_UPDATE_FINISH_INTERNAL")
     RETURN 1
-  END SUBROUTINE DISTRIBUTED_VECTOR_UPDATE_FINISH
+  END SUBROUTINE DISTRIBUTED_VECTOR_UPDATE_FINISH_INTERNAL
 
   !
   !================================================================================================================================
@@ -7789,6 +7874,62 @@ CONTAINS
     CALL EXITS("DISTRIBUTED_VECTOR_UPDATE_START")
     RETURN 1
   END SUBROUTINE DISTRIBUTED_VECTOR_UPDATE_START
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Finishes the (ghost) update procedure for a distributed vector and returns a list of indices of the values changed
+  !!during this update. This routine will wait until all transfers have completed!
+  SUBROUTINE DISTRIBUTED_VECTOR_UPDATE_FINISH_GET_CHANGED_VALUES(DISTRIBUTED_VECTOR, &
+      & CHANGED_VALUES,NUM_CHANGED_VALUES,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(DISTRIBUTED_VECTOR_TYPE), POINTER :: DISTRIBUTED_VECTOR !<A pointer to the distributed vector
+    INTEGER(INTG), ALLOCATABLE, INTENT(OUT) :: CHANGED_VALUES(:) !<After return CHANGED_VALUES(1:NUM_CHANGED_VALUES) are
+                                                                 !!the indices of the values changed during this update
+    INTEGER(INTG), INTENT(OUT) :: NUM_CHANGED_VALUES !<After return the number of values changed during this update
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+   
+    CALL ENTERS("DISTRIBUTED_VECTOR_UPDATE_FINISH_GET_CHANGED_VALUES",ERR,ERROR,*999)
+
+    CALL DISTRIBUTED_VECTOR_UPDATE_FINISH_INTERNAL(DISTRIBUTED_VECTOR, &
+        & .True.,CHANGED_VALUES,NUM_CHANGED_VALUES,ERR,ERROR,*999)
+    
+    CALL EXITS("DISTRIBUTED_VECTOR_UPDATE_FINISH_GET_CHANGED_VALUES")
+    RETURN
+999 CALL ERRORS("DISTRIBUTED_VECTOR_UPDATE_FINISH_GET_CHANGED_VALUES",ERR,ERROR)
+    CALL EXITS("DISTRIBUTED_VECTOR_UPDATE_FINISH_GET_CHANGED_VALUES")
+    RETURN 1
+  END SUBROUTINE DISTRIBUTED_VECTOR_UPDATE_FINISH_GET_CHANGED_VALUES
+
+  !
+  !================================================================================================================================
+  !
+
+  !>Finishes the (ghost) update procedure for a distributed vector. This routine will wait until all transfers have completed!
+  SUBROUTINE DISTRIBUTED_VECTOR_UPDATE_FINISH_DONT_GET_CHANGED_VALUES(DISTRIBUTED_VECTOR,ERR,ERROR,*)
+
+    !Argument variables
+    TYPE(DISTRIBUTED_VECTOR_TYPE), POINTER :: DISTRIBUTED_VECTOR !<A pointer to the distributed vector
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    INTEGER(INTG) :: unused
+    INTEGER(INTG), ALLOCATABLE :: unusedArray(:)
+   
+    CALL ENTERS("DISTRIBUTED_VECTOR_UPDATE_FINISH_DONT_GET_CHANGED_VALUES",ERR,ERROR,*999)
+
+    CALL DISTRIBUTED_VECTOR_UPDATE_FINISH_INTERNAL(DISTRIBUTED_VECTOR,.False.,unusedArray,unused,ERR,ERROR,*999)
+    
+    CALL EXITS("DISTRIBUTED_VECTOR_UPDATE_FINISH_DONT_GET_CHANGED_VALUES")
+    RETURN
+999 CALL ERRORS("DISTRIBUTED_VECTOR_UPDATE_FINISH_DONT_GET_CHANGED_VALUES",ERR,ERROR)
+    CALL EXITS("DISTRIBUTED_VECTOR_UPDATE_FINISH_DONT_GET_CHANGED_VALUES")
+    RETURN 1
+  END SUBROUTINE DISTRIBUTED_VECTOR_UPDATE_FINISH_DONT_GET_CHANGED_VALUES
 
   !
   !================================================================================================================================
