@@ -614,7 +614,7 @@ MODULE FIELD_ROUTINES
 
   PUBLIC FIELD_PARAMETER_SET_OUTPUT
 
-  PUBLIC FIELD_PARAMETER_SET_UPDATE_FINISH,FIELD_PARAMETER_SET_UPDATE_START
+  PUBLIC FIELD_PARAMETER_SET_UPDATE_FINISH,FIELD_PARAMETER_SET_UPDATE_START,FIELD_PARAMETER_SET_UPDATE_ISFINISHED
 
   PUBLIC FIELD_PARAMETER_SET_UPDATE_CONSTANT,FIELD_PARAMETER_SET_UPDATE_LOCAL_DOF,FIELD_PARAMETER_SET_UPDATE_ELEMENT, &
     & FIELD_PARAMETER_SET_UPDATE_LOCAL_ELEMENT,FIELD_PARAMETER_SET_UPDATE_NODE,FIELD_PARAMETER_SET_UPDATE_LOCAL_NODE, &
@@ -20266,11 +20266,79 @@ CONTAINS
     CALL EXITS("FIELD_PARAMETER_SET_UPDATE_FINISH_GET_CHANGED_VALUES")
     RETURN 1
   END SUBROUTINE FIELD_PARAMETER_SET_UPDATE_FINISH_GET_CHANGED_VALUES
-
+  
   !
   !================================================================================================================================
   !
-
+  
+  !>Tests to see if a field parameter set update has finished. Can be called between the calls to
+  !!FIELD_PARAMETER_SET_UPDATE_START and FIELD_PARAMETER_SET_UPDATE_FINISH to do some work while waiting for the
+  !!communication to finish (or waiting for other processors to reach the point of communication).
+  SUBROUTINE FIELD_PARAMETER_SET_UPDATE_ISFINISHED(FIELD,VARIABLE_TYPE,FIELD_SET_TYPE,ISFINISHED,ERR,ERROR,*)
+    
+    !Argument variables
+    TYPE(FIELD_TYPE), POINTER :: FIELD !<A pointer to the field to check the update for
+    INTEGER(INTG), INTENT(IN) :: VARIABLE_TYPE !<The field variable type to check the update for
+                                               !!\see FIELD_ROUTINES_VariableTypes,FIELD_ROUTINES 
+    INTEGER(INTG), INTENT(IN) :: FIELD_SET_TYPE !<The field parameter set identifier to check the update for
+                                                !!\see FIELD_ROUTINES_ParameterSetTypes,FIELD_ROUTINES
+    LOGICAL, INTENT(OUT) :: ISFINISHED !<On return ISFINISHED will be .TRUE. if the field parameter set update has
+                                       !!finished or .FALSE. if it has not
+    INTEGER(INTG), INTENT(OUT) :: ERR !<The error code
+    TYPE(VARYING_STRING), INTENT(OUT) :: ERROR !<The error string
+    !Local Variables
+    TYPE(FIELD_PARAMETER_SET_TYPE), POINTER :: PARAMETER_SET
+    TYPE(FIELD_VARIABLE_TYPE), POINTER :: FIELD_VARIABLE
+    TYPE(VARYING_STRING) :: LOCAL_ERROR
+    
+    CALL ENTERS("FIELD_PARAMETER_SET_UPDATE_ISFINISHED",ERR,ERROR,*999)
+    
+    IF(.NOT. ASSOCIATED(FIELD)) THEN
+      CALL FLAG_ERROR("Field is not associated.",ERR,ERROR,*999)
+    ENDIF
+    IF(.NOT. FIELD%FIELD_FINISHED) THEN
+      LOCAL_ERROR="Field number "//TRIM(NUMBER_TO_VSTRING(FIELD%USER_NUMBER,"*",ERR,ERROR))// &
+        & " has not been finished."
+      CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+    ENDIF
+    IF(.NOT. (VARIABLE_TYPE>=1.AND.VARIABLE_TYPE<=FIELD_NUMBER_OF_VARIABLE_TYPES)) THEN
+      LOCAL_ERROR="The field variable type of "//TRIM(NUMBER_TO_VSTRING(VARIABLE_TYPE,"*",ERR,ERROR))// &
+        & " is invalid. The variable type must be between 1 and "// &
+        & TRIM(NUMBER_TO_VSTRING(FIELD_NUMBER_OF_VARIABLE_TYPES,"*",ERR,ERROR))//"."
+      CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+    ENDIF
+    FIELD_VARIABLE=>FIELD%VARIABLE_TYPE_MAP(VARIABLE_TYPE)%PTR
+    IF(.NOT. ASSOCIATED(FIELD_VARIABLE)) THEN
+      LOCAL_ERROR="The field variable type of "//TRIM(NUMBER_TO_VSTRING(VARIABLE_TYPE,"*",ERR,ERROR))// &
+        & " has not been created on field number "//TRIM(NUMBER_TO_VSTRING(FIELD%USER_NUMBER,"*",ERR,ERROR))//"."
+      CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+    ENDIF
+    IF(.NOT. (FIELD_SET_TYPE>0.AND.FIELD_SET_TYPE<=FIELD_NUMBER_OF_SET_TYPES)) THEN
+      LOCAL_ERROR="The field parameter set type of "//TRIM(NUMBER_TO_VSTRING(FIELD_SET_TYPE,"*",ERR,ERROR))// &
+        & " is invalid. The field parameter set type must be between 1 and "// &
+        & TRIM(NUMBER_TO_VSTRING(FIELD_NUMBER_OF_SET_TYPES,"*",ERR,ERROR))//"."
+      CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+    ENDIF
+    PARAMETER_SET=>FIELD_VARIABLE%PARAMETER_SETS%SET_TYPE(FIELD_SET_TYPE)%PTR
+    IF(.NOT. ASSOCIATED(PARAMETER_SET)) THEN
+      LOCAL_ERROR="The field parameter set type of "//TRIM(NUMBER_TO_VSTRING(FIELD_SET_TYPE,"*",ERR,ERROR))// &
+        & " has not been created on field number "//TRIM(NUMBER_TO_VSTRING(FIELD%USER_NUMBER,"*",ERR,ERROR))//"."
+      CALL FLAG_ERROR(LOCAL_ERROR,ERR,ERROR,*999)
+    ENDIF
+    
+    CALL DISTRIBUTED_VECTOR_UPDATE_ISFINISHED(PARAMETER_SET%PARAMETERS,ISFINISHED,ERR,ERROR,*999)
+    
+    CALL EXITS("FIELD_PARAMETER_SET_UPDATE_ISFINISHED")
+    RETURN
+999 CALL ERRORS("FIELD_PARAMETER_SET_UPDATE_ISFINISHED",ERR,ERROR)
+    CALL EXITS("FIELD_PARAMETER_SET_UPDATE_ISFINISHED")
+    RETURN 1
+  END SUBROUTINE FIELD_PARAMETER_SET_UPDATE_ISFINISHED
+  
+  !
+  !================================================================================================================================
+  !
+  
   !>Updates the given parameter set with the given integer value for a particular user node, derivative and version of the field variable component. \see OPENCMISS::CMISSFieldParameterSetUpdateNode
   SUBROUTINE FIELD_PARAMETER_SET_UPDATE_NODE_INTG(FIELD,VARIABLE_TYPE,FIELD_SET_TYPE,VERSION_NUMBER,DERIVATIVE_NUMBER, &
     & USER_NODE_NUMBER,COMPONENT_NUMBER,VALUE,ERR,ERROR,*)
